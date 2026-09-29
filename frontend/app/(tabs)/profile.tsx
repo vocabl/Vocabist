@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, ScrollView } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { makeStyles, useTheme } from '@/src/theme';
@@ -9,7 +10,6 @@ import { Icon } from '@/src/components/Icon';
 import { Button } from '@/src/components/Button';
 import { Skeleton } from '@/src/components/Skeleton';
 import { useAuth } from '@/src/auth/AuthContext';
-import { useToast } from '@/src/components/Toast';
 import { api } from '@/src/api/client';
 
 type Achievement = { key: string; title: string; desc: string; goal: number; value: number; unlocked: boolean; progress: number };
@@ -24,7 +24,7 @@ export default function Profile() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { user, signOut } = useAuth();
-  const toast = useToast();
+  const router = useRouter();
 
   const pQ = useQuery({ queryKey: ['progress'], queryFn: () => api<Progress>('/progress') });
   const p = pQ.data;
@@ -105,13 +105,15 @@ export default function Profile() {
       {/* Upgrade */}
       <Card style={styles.proCard} testID="upgrade-pro-card">
         <View style={styles.proHead}>
-          <Icon name="crown" size={22} color={colors.warning} />
-          <AppText weight="semibold" size={17}>Vocably Pro</AppText>
+          <Icon name={user?.tier === 'pro' ? 'crown' : 'crown-outline'} size={22} color={colors.warning} />
+          <AppText weight="semibold" size={17}>{user?.tier === 'pro' ? 'Vocably Pro · Active' : 'Vocably Pro'}</AppText>
         </View>
         <AppText size={14} color={colors.onSurfaceTertiary} style={{ marginTop: 6, lineHeight: 20 }}>
-          Unlimited adaptive learning, full exam libraries, advanced analytics and AI features.
+          {user?.tier === 'pro'
+            ? 'You have unlimited learning, all exams, advanced analytics and AI features.'
+            : 'Unlimited adaptive learning, full exam libraries, advanced analytics and AI features.'}
         </AppText>
-        <Button label="Upgrade to Pro" icon="crown-outline" onPress={() => toast.show('Pro plans are coming soon!', 'info')} style={{ marginTop: 14 }} testID="upgrade-button" />
+        <Button label={user?.tier === 'pro' ? 'Manage subscription' : 'Upgrade to Pro'} icon="crown-outline" onPress={() => router.push('/paywall')} style={{ marginTop: 14 }} testID="upgrade-button" />
       </Card>
 
       <Button label="Log out" variant="ghost" icon="logout" onPress={signOut} style={{ marginTop: 20 }} testID="logout-button" />

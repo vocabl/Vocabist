@@ -45,6 +45,23 @@ export default function Learn() {
         <Icon name="chevron-right" size={22} color={colors.muted} />
       </Card>
 
+      <View style={styles.featureRow}>
+        <Card style={styles.featureCard} onPress={() => router.push('/read')} testID="read-learn-card">
+          <View style={[styles.topicIcon, { backgroundColor: colors.brandTertiary }]}>
+            <Icon name="book-open-page-variant" size={22} color={colors.brand} />
+          </View>
+          <AppText weight="medium" size={15} style={{ marginTop: 10 }}>Read & Learn</AppText>
+          <AppText size={12} color={colors.muted} style={{ marginTop: 2 }}>Tap words in short articles</AppText>
+        </Card>
+        <Card style={styles.featureCard} onPress={() => router.push('/import')} testID="learn-anything-card">
+          <View style={[styles.topicIcon, { backgroundColor: '#FBEEDD' }]}>
+            <Icon name="file-import-outline" size={22} color={colors.warning} />
+          </View>
+          <AppText weight="medium" size={15} style={{ marginTop: 10 }}>Learn Anything</AppText>
+          <AppText size={12} color={colors.muted} style={{ marginTop: 2 }}>Paste text or a PDF</AppText>
+        </Card>
+      </View>
+
       <AppText weight="medium" size={16} style={styles.section}>Practice by topic</AppText>
       {topicsQ.isLoading ? (
         <View style={{ gap: 12 }}>
@@ -91,4 +108,6 @@ const useStyles = makeStyles((t) => ({
   section: { marginTop: t.spacing.xl, marginBottom: t.spacing.md },
   topicRow: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md },
   topicIcon: { width: 44, height: 44, borderRadius: t.radius.md, backgroundColor: t.colors.brandTertiary, alignItems: 'center', justifyContent: 'center' },
+  featureRow: { flexDirection: 'row', gap: t.spacing.md, marginTop: t.spacing.lg },
+  featureCard: { flex: 1 },
 }));

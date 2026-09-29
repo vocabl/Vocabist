@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 3 tested the 3 new features (Read & Learn, Learn From Anything, Smart Review Nudges) + light regression. Backend: 17/17 pytest cases pass in /app/backend/tests/test_iter3_features.py — articles list/detail (with body + level filter + 404), /api/lookup for in-bank words ('abate') AND AI fallback ('serendipity' via gpt-5.6-luna since dictionary API is network-blocked), /api/words/import for AI-imported new word, /api/extract for pasted text (counts + known/learning/new items include 'abate' from bank), /api/extract-pdf (accepts small PDF and classifies OR returns 422 for unreadable payload), /api/review/slipping (empty for fresh user; correctly surfaces a word after one correct answer that promotes NEW->SEEN status with mastery>0 and next_review within the 2-day horizon), /api/practice/start?source=slipping returns questions for the same word, /api/practice/start?source=list&ref=abate,serendipity resolves in-bank + AI-imports the new word and returns questions, regression on entitlements (free tier 8 new/day), mission cap, and practice answer/complete. Frontend: demo@vocably.app login OK; Home shows 'Slipping from memory' card (slipping-card) with correct copy and taps into /session?source=slipping; Learn tab Read & Learn card -> /read shows 4 seeded articles; opening an article renders the reader with tokenized words as tappable <Text onPress>; tapping the word 'consistent' opened a bottom sheet with the definition, IPA, example, [Listen] and [Save word] buttons — Save fires the save flow without error. Learn From Anything: pasting sample text and tapping 'Find words' returned counts 11 New / 0 Learning / 0 Known plus 11 selectable new-word chips (all with testID new-word-<hw>) and a working 'Learn 10 new words' CTA (updates count as chips are toggled). Deprecated packages detected: none. Deprecated style-prop warnings still present (shadow*, unchanged from prior iters).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/review/slipping (semantic)", "issue": "A NEW word answered INCORRECTLY on its first attempt stays at status='NEW' (mastery stays at 0; status_from_mastery requires score>0 to reach SEEN), so it is NOT surfaced in the slipping list even though the user got it wrong. Only correct answers (which lift mastery >0) or already-SEEN words appear in slipping. Consider promoting first-time wrong answers to SEEN so the reviewer sees them again quickly. Repro: fresh user -> POST /practice/answer {word_id:'abate', correct:false} -> GET /review/slipping returns count=0."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Various (carry-over from iter 1 & 2)", "issue": "'shadow*' style props are deprecated in react-native-web; migrate to 'boxShadow'. Reference: multiple StyleSheet.create() blocks (home.tsx, cards, etc.)"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_features.py",
+    "/app/test_reports/pytest/pytest_iter3.xml"
+  ],
+  "action_items": [
+    "(minor) Slipping semantics: promote first-time wrong answers to SEEN so a beginner user who fails a word is nudged to review it. Current status_from_mastery requires mastery>0 to leave NEW; consider `if times_seen > 0 and score == 0: return 'SEEN'` OR give a small mastery floor on first wrong answer.",
+    "(carry-over) Migrate deprecated shadow* style props to boxShadow (still emits warnings on every screen).",
+    "(carry-over from iter 2) Fix paywall.tsx Pro-state re-render bug."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1204-1219 /api/lookup falls back to AI when the word is not in the bank AND the dictionary API returns non-200 or throws — good; verified working end-to-end for 'serendipity' with gpt-5.6-luna via emergentintegrations.",
+    "server.py:1246-1251 /api/words/import correctly upserts imported words with provenance='imported', cefr defaulted to B1, and returns the slugified id; frontend read/[id].tsx uses this to save non-bank words.",
+    "server.py:1090-1103 slipping_word_ids: 2-day horizon + mastery_score<90 filter is reasonable; ordering by (-overdue, mastery, -times_wrong) surfaces the most-overdue first. But excludes status='NEW' entries — see slipping semantics note.",
+    "server.py:1298-1312 /api/extract-pdf hard-limits to 8MB and 20 pages — good defense. pypdf can silently return empty strings for scanned PDFs; 422 message is friendly.",
+    "read/[id].tsx:99 renders tokens as <Text onPress> (not Pressable). Works but reduces a11y — role=button isn't emitted on web so screen-readers won't announce them as buttons. Consider Pressable with accessibilityRole='button' for a11y."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_features.py"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% - all 3 new features verified end-to-end (Read & Learn tap->sheet->save; Learn Anything paste->chips->Learn N; Home slipping-card visible and starts session)"},
+  "seed_data_creation": "None. Tests register per-run TEST_* users. Demo user tier remains 'free'. Demo user gained one saved word ('consistent') from the frontend Read & Learn test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 3 iter-3 features work end-to-end. Read & Learn word tokens are <Text onPress> — Playwright must click via page.get_by_text('<word>', exact=True).first (role=button is NOT emitted). Reader testIDs: reader-back, reader-listen, reader-save. Import testIDs: import-text-input, extract-text-button, upload-pdf-button, new-word-<headword>, learn-new-words-button. Home slipping testID: slipping-card; Learn cards: read-learn-card, learn-anything-card. Demo login flow: landing page shows a 'Log in' text link — click that first, then use email-input/password-input/login-submit-button. Note the minor slipping semantics observation for the main agent (wrong-first-answer stays NEW so it doesn't show in slipping).",
+  "rca_of_issue": "Slipping list omits first-wrong NEW words: compute_review starts with mastery=0; a wrong answer does mastery=max(0, 0-20)=0; status_from_mastery returns 'NEW' (requires score>0 for SEEN). slipping_word_ids filters status IN [SEEN,LEARNING,RECALLING], so the wrong-first-time word is excluded. Impact is small (real users see the same word again in the same session before it 'slips'), but worth acknowledging. Mitigation: either lower the mastery-floor threshold or explicitly include NEW words that have times_seen>0 in slipping."
+}

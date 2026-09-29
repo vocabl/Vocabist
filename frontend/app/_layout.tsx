@@ -67,6 +67,7 @@ function RootNav() {
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="session" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="word/[id]" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="exam/[slug]" options={{ animation: 'slide_from_right' }} />
     </Stack>

@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 2 tested 4 new features + regression on Vocably. Backend: 33/33 pytest cases pass, including all new endpoints (entitlements shape+limits, subscription activate/cancel round-trip, word-bank scale 230 words with cefr+exam filters, /words/{id}/audio Dictionary+TTS fallback, /api/tts/{key}.mp3 serves audio/mpeg 200 with real mp3 payload, AI Coach generates+caches via gpt-5.6-luna with 3/day free-tier limit enforced returning 402 on 4th unique word, cached words don't count, GRE locked=true + /practice/start?source=exam&ref=gre returns 402 for free user, unlocks after subscription/activate). Regression: mission free new_count<=8, practice start/answer/complete, all prior 22 tests still pass. Frontend: word detail shows Listen button (functional), 'Explain this with AI' generates and renders Explanation/Fresh example/Memory hook inline; synonym/antonym related chips render with testID related-chip-<headword>; Profile shows Upgrade-to-Pro button; paywall opens with plan-monthly/plan-yearly selectors and Start-Pro subscribe-button; subscribe API succeeds (Profile then shows 'Vocably Pro · Active' and GRE unlocks with Start Practice CTA visible). One minor UX bug: after Start-Pro on the paywall page, the paywall itself does NOT re-render its Pro state (cancel-pro-button doesn't appear until you leave and re-enter the paywall) - refreshUser succeeds and other screens update, but paywall.tsx isn't re-subscribing to the user state change. Deprecated packages detected: none in this iteration (expo-av / expo-barcode-scanner / expo-background-fetch not present). Deprecated style props still emit warnings: shadow* and pointerEvents (unchanged from iter 1).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/words?limit>100", "issue": "Limit hard-capped at 100 (le=100 in Query). Not a bug but tests need pagination via offset to sweep the 230-word bank."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/paywall.tsx", "issue": "After tapping Start Pro on the paywall, the page does not re-render its Pro state — cancel-pro-button is not shown until the user navigates away and comes back. activate() calls refreshUser() but the paywall reads user?.tier at first render and does not react to the auth-store update. Repro: /paywall -> Start Pro -> stay on page -> still shows Start Pro. Workaround: navigate back to Profile (which shows 'Vocably Pro · Active') then reopen paywall — cancel-pro-button then appears.", "testID": "cancel-pro-button / subscribe-button", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Various (unchanged from iter 1)", "issue": "'shadow*' style props are deprecated. Use 'boxShadow'. Reference: numerous StyleSheet.create() blocks."},
+      {"component": "Various (unchanged from iter 1)", "issue": "'props.pointerEvents' is deprecated. Use style.pointerEvents."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_vocably_api.py",
+    "/app/test_reports/pytest/pytest_results_iter2.xml"
+  ],
+  "action_items": [
+    "Make paywall.tsx reactive to the auth store: subscribe to user via useAuth() and derive isPro from that (not from a snapshot), or await refreshUser and then rely on the re-render. Currently the page persists Start-Pro after successful activation.",
+    "(carry-over) Migrate deprecated shadow* style props to boxShadow and pointerEvents prop to style.pointerEvents for React Native web.",
+    "(carry-over) Fix Profile stats grid single-character-per-line layout bug reported in iter 1."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1015 — AI Coach 402 message is clear; cached words correctly skip the used counter (usage recorded only after generation on line 1052). Verified in test_ai_coach_free_limit.",
+    "server.py:983-989 — audio TTS fallback silently swallows exceptions; consider logging when make_tts fails so we can catch outages.",
+    "server.py:702 — locked_exams check correctly gates /practice/start?source=exam; ensure UI on exam/[slug].tsx also hides exam-practice-button when locked (currently shows exam-unlock-button — verified locked=true from API triggers the correct branch)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_features.py"
+  ],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "~92% - all core flows working; paywall Pro-state re-render bug"},
+  "seed_data_creation": "None. Tests register per-run TEST_* users. Cleanup: demo user was activated to Pro during frontend test and reverted to free via /api/subscription/cancel at end of run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend coverage in /app/backend/tests/test_new_features.py (11 tests) + /app/backend/tests/test_vocably_api.py (22 tests). Use EXPO_PUBLIC_BACKEND_URL. Auth testIDs are 'email-input' / 'password-input' / 'login-submit-button' / 'register-submit-button' (NOT the 'login-email-input' prefix I originally guessed). Paywall testIDs: paywall-close, plan-monthly, plan-yearly, subscribe-button, cancel-pro-button. Word detail: pron-listen, pron-us, pron-uk, ai-coach-button, related-chip-<headword>. Exam: exam-unlock-button (when locked), exam-practice-button (when unlocked). Profile: upgrade-button, upgrade-pro-card. Demo user tier reset to 'free' at end of run.",
+  "rca_of_issue": "Paywall Pro-state stale render: app/paywall.tsx line 42 reads `const isPro = user?.tier === 'pro'` from an auth hook. After tapping Start Pro, activate() calls the mock subscription API + refreshUser(), which updates the user object in the auth store. If the paywall is memoizing or if useAuth() doesn't return a live subscription, isPro doesn't flip. Fix: ensure useAuth() returns a subscribed value (e.g. Zustand selector) and/or reset local state on user change via useEffect(() => {}, [user?.tier])."
+}

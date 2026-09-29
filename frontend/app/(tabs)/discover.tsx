@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, ScrollView, FlatList, Pressable, TextInput } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Image } from 'expo-image';
@@ -25,9 +25,14 @@ export default function Discover() {
   const router = useRouter();
   const qc = useQueryClient();
 
+  const params = useLocalSearchParams<{ q?: string }>();
   const [search, setSearch] = useState('');
   const [cefr, setCefr] = useState('All');
   const [topic, setTopic] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (params.q) setSearch(String(params.q));
+  }, [params.q]);
 
   const topicsQ = useQuery({ queryKey: ['topics'], queryFn: () => api<{ topics: Topic[] }>('/topics') });
 

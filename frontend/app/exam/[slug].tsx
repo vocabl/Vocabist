@@ -18,7 +18,7 @@ const HEADER_IMG = 'https://images.unsplash.com/photo-1661264083807-5e6a54fb12da
 type ExamDetail = {
   exam: { slug: string; name: string; full_name: string; description: string };
   words: any[]; total_words: number; mastered: number; learning: number;
-  days_left: number | null; is_active: boolean; target_score: number | null; words_per_day: number | null;
+  days_left: number | null; is_active: boolean; target_score: number | null; words_per_day: number | null; locked?: boolean;
 };
 
 export default function ExamDetail() {
@@ -117,7 +117,11 @@ export default function ExamDetail() {
 
       {d && d.total_words > 0 ? (
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
-          <Button label="Start practice" icon="play" onPress={() => router.push(`/session?source=exam&ref=${slug}`)} testID="exam-practice-button" />
+          {d.locked ? (
+            <Button label="Unlock with Pro" icon="crown-outline" onPress={() => router.push('/paywall')} testID="exam-unlock-button" />
+          ) : (
+            <Button label="Start practice" icon="play" onPress={() => router.push(`/session?source=exam&ref=${slug}`)} testID="exam-practice-button" />
+          )}
         </View>
       ) : null}
     </View>

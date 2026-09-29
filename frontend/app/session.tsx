@@ -88,6 +88,7 @@ export default function Session() {
       qc.invalidateQueries({ queryKey: ['mission'] });
       qc.invalidateQueries({ queryKey: ['progress'] });
       qc.invalidateQueries({ queryKey: ['exams'] });
+      qc.invalidateQueries({ queryKey: ['slipping'] });
       setDone(true);
       return;
     }

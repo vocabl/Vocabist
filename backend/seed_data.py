@@ -327,3 +327,43 @@ WORDS = [
         "exam_relevance": ["ielts", "toefl"], "academic_importance": 3,
     },
 ]
+
+
+ARTICLES = [
+    {
+        "id": "morning-routines",
+        "title": "The Science of Morning Routines",
+        "level": "B1",
+        "topic": "everyday",
+        "minutes": 2,
+        "excerpt": "Why the first hour of your day shapes everything that follows.",
+        "body": "Many successful people follow a deliberate morning routine. They believe the first hour shapes the rest of the day. A consistent routine can reduce stress and improve focus. Instead of reaching for a phone, some people meditate, stretch, or write in a journal. These small habits build momentum. Over time, a calm and productive morning becomes automatic. The goal is not perfection but consistency. When your morning is intentional, your whole day feels more balanced and less chaotic.",
+    },
+    {
+        "id": "why-we-sleep",
+        "title": "Why We Need Sleep",
+        "level": "A2",
+        "topic": "science",
+        "minutes": 2,
+        "excerpt": "Sleep is not wasted time — it is when the brain repairs itself.",
+        "body": "Sleep is essential for a healthy body and mind. While we sleep, the brain sorts memories and removes waste. People who sleep well can concentrate better and feel happier. When we do not get enough sleep, we become tired, forgetful, and irritable. Adults usually need seven to nine hours each night. A regular sleep schedule helps the body know when to rest. Avoiding bright screens before bed can also improve sleep quality. Good sleep is one of the simplest ways to protect your health.",
+    },
+    {
+        "id": "power-of-habits",
+        "title": "The Power of Small Habits",
+        "level": "B2",
+        "topic": "business",
+        "minutes": 3,
+        "excerpt": "Tiny changes, repeated daily, compound into remarkable results.",
+        "body": "We often believe that big goals require dramatic action. In reality, lasting change comes from small, consistent habits. A habit is a behaviour repeated until it becomes automatic. When you improve by just one percent each day, the gains accumulate. This is the principle of compounding, familiar from finance but equally powerful in personal growth. The key is to make good habits obvious and easy, and bad habits difficult. Environment matters more than motivation. If you want to read more, leave a book on your pillow. If you want to eat better, keep healthy food visible. Design your surroundings, and your habits will follow.",
+    },
+    {
+        "id": "climate-language",
+        "title": "How Language Shapes Thought",
+        "level": "C1",
+        "topic": "academic",
+        "minutes": 3,
+        "excerpt": "Does the language you speak change the way you perceive the world?",
+        "body": "Linguists have long debated whether language influences thought. The hypothesis suggests that the structure of a language affects how its speakers conceptualise the world. Some languages, for instance, have numerous precise words for colours, while others use only a few broad categories. Speakers of languages with detailed spatial vocabulary may navigate more accurately. Critics argue that thought is universal and that language merely labels pre-existing concepts. Nevertheless, growing evidence indicates that language and cognition are deeply intertwined. Learning a new language, then, is not simply acquiring vocabulary; it is adopting a subtly different lens through which to interpret reality.",
+    },
+]

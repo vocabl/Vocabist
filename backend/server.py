@@ -7,19 +7,21 @@ entitlements and analytics events.
 """
 import os
 import re
+import json
 import secrets
+import hashlib
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Any
 
 import httpx
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 
-from seed_data import WORDS, TOPICS, EXAMS
+from seed_data import WORDS, TOPICS, EXAMS, ARTICLES
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
@@ -27,6 +29,18 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"))
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ.get("DB_NAME", "vocably")
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+APP_URL = os.environ.get("APP_URL", "").rstrip("/")
+
+# ---- entitlements (centralized; do not scatter tier checks) ----
+ENTITLEMENTS = {
+    "free": {"daily_new_words": 8, "ai_coach_per_day": 3, "locked_exams": ["gre", "gmat"], "unlimited": False},
+    "pro": {"daily_new_words": 9999, "ai_coach_per_day": 9999, "locked_exams": [], "unlimited": True},
+}
+
+
+def entitlements_for(tier: str) -> dict:
+    return ENTITLEMENTS.get(tier or "free", ENTITLEMENTS["free"])
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -197,6 +211,10 @@ def compute_review(prev: Optional[dict], correct: bool, response_time_ms: int) -
 
     idx = min(consecutive, len(INTERVALS_DAYS) - 1)
     interval_days = INTERVALS_DAYS[idx] if correct else 0
+
+    status = status_from_mastery(mastery, consecutive)
+    if status == "NEW" and times_seen >= 1:
+        status = "SEEN"  # a word the learner has attempted is never "new" again
     if not correct:
         next_review = now_utc() + timedelta(minutes=10)
     elif interval_days == 0:
@@ -218,7 +236,7 @@ def compute_review(prev: Optional[dict], correct: bool, response_time_ms: int) -
         "last_reviewed_at": now_utc(),
         "next_review_at": next_review,
         "average_response_time": avg_rt,
-        "status": status_from_mastery(mastery, consecutive),
+        "status": status,
         "updated_at": now_utc(),
     }
 
@@ -600,6 +618,7 @@ async def exam_detail(slug: str, user: dict = Depends(get_current_user)):
         "is_active": prof.get("exam_slug") == slug,
         "target_score": prof.get("target_score") if prof.get("exam_slug") == slug else None,
         "words_per_day": max(5, round(prof.get("daily_minutes", 10) * 1.2)) if prof.get("exam_slug") == slug else None,
+        "locked": slug in entitlements_for(user.get("tier"))["locked_exams"],
     }
 
 # ---------------------------------------------------------------------------
@@ -636,6 +655,8 @@ async def select_mission_words(user: dict) -> dict:
     candidates.sort(key=lambda w: (-w.get("academic_importance", 0), -w.get("frequency", 0)))
     remaining = max(0, target - len(due_ids))
     new_ids = [w["id"] for w in candidates][:max(remaining, min(5, len(candidates)))]
+    ent = entitlements_for(user.get("tier"))
+    new_ids = new_ids[:ent["daily_new_words"]]
 
     return {"target": target, "due_ids": due_ids, "new_ids": new_ids,
             "review_count": len(due_ids), "new_count": len(new_ids),
@@ -682,6 +703,8 @@ async def practice_start(
         sel = await select_mission_words(user)
         word_ids = sel["due_ids"] + sel["new_ids"]
     elif source == "exam" and ref:
+        if ref in entitlements_for(user.get("tier"))["locked_exams"]:
+            raise HTTPException(status_code=402, detail="Upgrade to Pro to practice this exam")
         ws = await db.words.find({"exam_relevance": ref, "status": "PUBLISHED"}, {"_id": 0, "id": 1}).to_list(100)
         word_ids = [w["id"] for w in ws][:15]
     elif source == "topic" and ref:
@@ -689,6 +712,15 @@ async def practice_start(
         word_ids = [w["id"] for w in ws][:15]
     elif source == "word" and ref:
         word_ids = [ref]
+    elif source == "list" and ref:
+        tokens = [x for x in ref.split(",") if x][:15]
+        word_ids = []
+        for tk in tokens:
+            wid = tk if await db.words.find_one({"id": tk}, {"_id": 1}) else await ensure_word(tk)
+            if wid:
+                word_ids.append(wid)
+    elif source == "slipping":
+        word_ids = await slipping_word_ids(user["user_id"])
     elif source == "saved":
         ws = await db.saved_words.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(100)
         word_ids = [w["word_id"] for w in ws][:15]
@@ -857,6 +889,464 @@ async def analytics(body: AnalyticsBody, user: dict = Depends(get_current_user))
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# entitlements / subscription
+# ---------------------------------------------------------------------------
+
+
+class SubscribeBody(BaseModel):
+    plan: str = "monthly"
+
+
+async def ai_coach_used_today(user_id: str) -> int:
+    today = date.today().isoformat()
+    return await db.ai_coach_usage.count_documents({"user_id": user_id, "date": today})
+
+
+@api.get("/entitlements")
+async def get_entitlements(user: dict = Depends(get_current_user)):
+    tier = user.get("tier", "free")
+    ent = entitlements_for(tier)
+    return {
+        "tier": tier,
+        "is_pro": tier == "pro",
+        "limits": ent,
+        "ai_coach_used_today": await ai_coach_used_today(user["user_id"]),
+    }
+
+
+@api.post("/subscription/activate")
+async def activate_subscription(body: SubscribeBody, user: dict = Depends(get_current_user)):
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"tier": "pro"}})
+    await db.subscriptions.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"user_id": user["user_id"], "plan": body.plan, "status": "active",
+                  "platform": "mock", "started_at": now_utc()}},
+        upsert=True,
+    )
+    await log_event(user["user_id"], "subscription_started", {"plan": body.plan})
+    return {"tier": "pro"}
+
+
+@api.post("/subscription/cancel")
+async def cancel_subscription(user: dict = Depends(get_current_user)):
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"tier": "free"}})
+    await db.subscriptions.update_one({"user_id": user["user_id"]}, {"$set": {"status": "cancelled"}})
+    await log_event(user["user_id"], "subscription_cancelled", {})
+    return {"tier": "free"}
+
+
+# ---------------------------------------------------------------------------
+# pronunciation audio (Free Dictionary API + OpenAI TTS fallback)
+# ---------------------------------------------------------------------------
+
+
+def clean_for_tts(text: str) -> str:
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"[*_#>~|`]", "", text)
+    return re.sub(r"\s+", " ", text).strip()[:300]
+
+
+async def make_tts(text: str) -> str:
+    """Generate (or reuse) a cached mp3 for text; return its /api/tts key."""
+    from emergentintegrations.llm.openai import OpenAITextToSpeech
+    key = hashlib.sha256(f"{text}|alloy|1.0|tts-1|mp3".encode()).hexdigest()
+    existing = await db.tts_cache.find_one({"key": key}, {"_id": 1})
+    if not existing:
+        tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+        audio = await tts.generate_speech(text=clean_for_tts(text), model="tts-1", voice="alloy")
+        await db.tts_cache.insert_one({"key": key, "audio": audio, "created_at": now_utc()})
+    return key
+
+
+@api.get("/tts/{key}.mp3")
+async def serve_tts(key: str):
+    doc = await db.tts_cache.find_one({"key": key})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(content=bytes(doc["audio"]), media_type="audio/mpeg",
+                    headers={"Cache-Control": "public, max-age=31536000"})
+
+
+@api.get("/words/{word_id}/audio")
+async def word_audio(word_id: str, user: dict = Depends(get_current_user)):
+    w = await db.words.find_one({"id": word_id}, {"_id": 0})
+    if not w:
+        raise HTTPException(status_code=404, detail="Word not found")
+    if w.get("audio"):
+        return w["audio"]
+
+    us_url = uk_url = None
+    try:
+        async with httpx.AsyncClient(timeout=4) as http:
+            r = await http.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{w['headword']}")
+        if r.status_code == 200:
+            for entry in r.json():
+                for ph in entry.get("phonetics", []):
+                    a = ph.get("audio") or ""
+                    if a.endswith("-us.mp3") and not us_url:
+                        us_url = a
+                    elif a.endswith("-uk.mp3") and not uk_url:
+                        uk_url = a
+                    elif a and not us_url:
+                        us_url = a
+    except Exception:
+        pass
+
+    tts_url = None
+    if not us_url and not uk_url:
+        try:
+            key = await make_tts(w["headword"])
+            tts_url = f"/tts/{key}.mp3"  # relative to /api; frontend prefixes with its own base
+        except Exception:
+            tts_url = None
+
+    audio = {"us_url": us_url, "uk_url": uk_url, "tts_url": tts_url}
+    await db.words.update_one({"id": word_id}, {"$set": {"audio": audio}})
+    return audio
+
+
+# ---------------------------------------------------------------------------
+# AI Coach (gpt-5.6-luna) — supplementary, never overwrites canonical content
+# ---------------------------------------------------------------------------
+
+
+@api.post("/words/{word_id}/ai-coach")
+async def ai_coach(word_id: str, user: dict = Depends(get_current_user)):
+    w = await db.words.find_one({"id": word_id}, {"_id": 0})
+    if not w:
+        raise HTTPException(status_code=404, detail="Word not found")
+
+    cached = await db.ai_coach_content.find_one({"word_id": word_id}, {"_id": 0})
+    if cached:
+        return {"content": cached["content"], "provenance": "ai_generated", "cached": True}
+
+    tier = user.get("tier", "free")
+    ent = entitlements_for(tier)
+    used = await ai_coach_used_today(user["user_id"])
+    if used >= ent["ai_coach_per_day"]:
+        raise HTTPException(status_code=402, detail="Daily AI Coach limit reached. Upgrade to Pro for unlimited.")
+
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI is not configured")
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"coach-{word_id}",
+        system_message="You are a friendly, concise English vocabulary coach. Always return strict JSON.",
+    ).with_model("openai", "gpt-5.6-luna")
+    prompt = (
+        f'For the English word "{w["headword"]}" (meaning: {w.get("simple_definition")}), '
+        'return ONLY JSON: {"explanation":"a warm 2-sentence plain-English explanation a learner will remember",'
+        '"example":"one fresh natural example sentence using the word","mnemonic":"a short vivid memory hook"}'
+    )
+    try:
+        resp = await chat.send_message(UserMessage(text=prompt))
+    except Exception:
+        raise HTTPException(status_code=502, detail="AI Coach is busy, try again")
+
+    text = resp if isinstance(resp, str) else str(resp)
+    text = re.sub(r"^```(json)?|```$", "", text.strip()).strip()
+    s, e = text.find("{"), text.rfind("}")
+    content = None
+    if s != -1 and e != -1:
+        try:
+            parsed = json.loads(text[s:e + 1])
+            if all(isinstance(parsed.get(k), str) and parsed[k].strip() for k in ("explanation", "example", "mnemonic")):
+                content = {k: parsed[k].strip() for k in ("explanation", "example", "mnemonic")}
+        except Exception:
+            content = None
+    if not content:
+        raise HTTPException(status_code=502, detail="Could not generate a good explanation, try again")
+
+    await db.ai_coach_content.insert_one({"word_id": word_id, "content": content,
+                                          "provenance": "ai_generated", "status": "PUBLISHED", "created_at": now_utc()})
+    await db.ai_coach_usage.insert_one({"user_id": user["user_id"], "word_id": word_id, "date": date.today().isoformat(), "created_at": now_utc()})
+    await log_event(user["user_id"], "ai_coach_generated", {"word_id": word_id})
+    return {"content": content, "provenance": "ai_generated", "cached": False}
+
+
+# ---------------------------------------------------------------------------
+# Read & Learn / Learn From Anything / Smart Review Nudges
+# ---------------------------------------------------------------------------
+
+STOPWORDS = set("""a an the and or but if then than that this these those of to in on at by for with about
+into over after before between out against during without within along across around is are was were be been
+being have has had do does did will would shall should can could may might must not no nor so as it its it's
+he she they them his her their our your you i we me my mine ours yours who whom whose which what when where why
+how all any both each few more most other some such only own same too very just also from up down off out very
+one two three there here their they're you're we're i'm""".split())
+
+
+class TextBody(BaseModel):
+    text: str
+
+
+class ImportBody(BaseModel):
+    headword: str
+
+
+class BuildBody(BaseModel):
+    word_ids: List[str]
+
+
+async def slipping_word_ids(user_id: str) -> List[str]:
+    horizon = now_utc() + timedelta(days=2)
+    progresses = await db.user_word_progress.find(
+        {"user_id": user_id, "status": {"$in": ["SEEN", "LEARNING", "RECALLING"]}}, {"_id": 0}
+    ).to_list(3000)
+    at_risk = [p for p in progresses
+               if ensure_aware(p.get("next_review_at")) and ensure_aware(p["next_review_at"]) <= horizon
+               and p.get("mastery_score", 0) < 90]
+
+    def risk(p):
+        overdue = (now_utc() - ensure_aware(p["next_review_at"])).total_seconds()
+        return (-overdue, p.get("mastery_score", 0), -p.get("times_wrong", 0))
+    at_risk.sort(key=risk)
+    return [p["word_id"] for p in at_risk][:20]
+
+
+@api.get("/review/slipping")
+async def review_slipping(user: dict = Depends(get_current_user)):
+    ids = await slipping_word_ids(user["user_id"])
+    prog = {p["word_id"]: p for p in await db.user_word_progress.find(
+        {"user_id": user["user_id"], "word_id": {"$in": ids}}, {"_id": 0}).to_list(100)}
+    words = {w["id"]: w for w in await db.words.find({"id": {"$in": ids}}, {"_id": 0}).to_list(100)}
+    items = []
+    for wid in ids:
+        w = words.get(wid)
+        if not w:
+            continue
+        p = prog.get(wid, {})
+        nr = ensure_aware(p.get("next_review_at"))
+        overdue_days = max(0, round((now_utc() - nr).total_seconds() / 86400)) if nr else 0
+        items.append({
+            "id": wid, "headword": w["headword"], "cefr": w.get("cefr"),
+            "simple_definition": w["simple_definition"],
+            "status": p.get("status", "SEEN"),
+            "mastery_score": round(p.get("mastery_score", 0)),
+            "overdue_days": overdue_days,
+        })
+    return {"count": len(items), "words": items}
+
+
+@api.get("/articles")
+async def list_articles(level: Optional[str] = None, topic: Optional[str] = None,
+                        user: dict = Depends(get_current_user)):
+    q: dict = {}
+    if level:
+        q["level"] = level
+    if topic:
+        q["topic"] = topic
+    arts = await db.articles.find(q, {"_id": 0, "body": 0}).to_list(100)
+    return {"articles": arts}
+
+
+@api.get("/articles/{article_id}")
+async def get_article(article_id: str, user: dict = Depends(get_current_user)):
+    art = await db.articles.find_one({"id": article_id}, {"_id": 0})
+    if not art:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return {"article": art}
+
+
+async def ai_define(word: str) -> Optional[dict]:
+    if not EMERGENT_LLM_KEY:
+        return None
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"define-{word}",
+                       system_message="You are a concise English dictionary. Return strict JSON only.").with_model("openai", "gpt-5.6-luna")
+        prompt = (f'Define the English word "{word}". Return ONLY JSON: '
+                  '{"simple_definition":"one clear sentence","phonetic":"/IPA/",'
+                  '"example":"one natural example sentence","part_of_speech":"noun|verb|adjective|adverb"}. '
+                  'If it is not a real English word, return {"invalid":true}.')
+        resp = await chat.send_message(UserMessage(text=prompt))
+        text = resp if isinstance(resp, str) else str(resp)
+        text = re.sub(r"^```(json)?|```$", "", text.strip()).strip()
+        s, e = text.find("{"), text.rfind("}")
+        if s == -1 or e == -1:
+            return None
+        parsed = json.loads(text[s:e + 1])
+        if parsed.get("invalid") or not parsed.get("simple_definition"):
+            return None
+        return {"simple_definition": parsed["simple_definition"].strip(),
+                "phonetic": (parsed.get("phonetic") or "").strip(),
+                "example": (parsed.get("example") or "").strip(),
+                "part_of_speech": (parsed.get("part_of_speech") or "").strip()}
+    except Exception:
+        return None
+
+
+async def dictionary_lookup(word: str) -> Optional[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=4) as http:
+            r = await http.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}")
+        if r.status_code != 200:
+            return await ai_define(word)
+        entry = r.json()[0]
+        phonetic = entry.get("phonetic") or ""
+        definition = example = pos = ""
+        for m in entry.get("meanings", []):
+            pos = pos or m.get("partOfSpeech", "")
+            for d in m.get("definitions", []):
+                definition = definition or d.get("definition", "")
+                example = example or d.get("example", "")
+                if definition:
+                    break
+            if definition:
+                break
+        if not definition:
+            return await ai_define(word)
+        return {"phonetic": phonetic, "simple_definition": definition,
+                "example": example, "part_of_speech": pos}
+    except Exception:
+        return await ai_define(word)
+
+
+@api.get("/lookup")
+async def lookup(word: str = Query(...), user: dict = Depends(get_current_user)):
+    norm = re.sub(r"[^a-z]", "", word.lower())
+    if not norm:
+        raise HTTPException(status_code=400, detail="Invalid word")
+    w = await db.words.find_one({"headword": norm}, {"_id": 0})
+    if w:
+        saved = await db.saved_words.find_one({"user_id": user["user_id"], "word_id": w["id"]})
+        return {"in_bank": True, "id": w["id"], "headword": w["headword"],
+                "phonetic": w.get("phonetic"), "simple_definition": w["simple_definition"],
+                "example": w.get("example"), "cefr": w.get("cefr"),
+                "part_of_speech": w.get("part_of_speech"), "saved": bool(saved)}
+    d = await dictionary_lookup(norm)
+    if not d:
+        return {"in_bank": False, "headword": norm, "simple_definition": None, "found": False}
+    return {"in_bank": False, "found": True, "headword": norm, **d, "saved": False}
+
+
+async def ensure_word(headword: str) -> Optional[str]:
+    """Return a word id for `headword`, creating an imported entry if needed."""
+    norm = re.sub(r"[^a-z]", "", headword.lower())
+    if not norm:
+        return None
+    w = await db.words.find_one({"headword": norm}, {"_id": 0, "id": 1})
+    if w:
+        return w["id"]
+    d = await dictionary_lookup(norm)
+    if not d:
+        return None
+    wid = slugify(norm)
+    await db.words.update_one(
+        {"id": wid},
+        {"$set": {"id": wid, "headword": norm, "cefr": "B1", "topic": "everyday",
+                  "frequency": 3, "academic_importance": 2, "exam_relevance": [],
+                  "synonyms": [], "antonyms": [], "related": [],
+                  "easy_meaning": d["simple_definition"], "status": "PUBLISHED",
+                  "provenance": "imported", "created_at": now_utc(), **d}},
+        upsert=True,
+    )
+    return wid
+
+
+@api.post("/words/import")
+async def import_word(body: ImportBody, user: dict = Depends(get_current_user)):
+    wid = await ensure_word(body.headword)
+    if not wid:
+        raise HTTPException(status_code=404, detail="No definition found for that word")
+    return {"id": wid}
+
+
+def tokenize_vocab(text: str) -> List[str]:
+    words = re.findall(r"[A-Za-z][A-Za-z'-]+", text.lower())
+    seen, out = set(), []
+    for w in words:
+        w = w.strip("'-")
+        if len(w) < 4 or w in STOPWORDS or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+    return out[:60]
+
+
+async def classify_words(user_id: str, candidates: List[str]) -> dict:
+    bank = {w["headword"]: w for w in await db.words.find(
+        {"headword": {"$in": candidates}}, {"_id": 0, "id": 1, "headword": 1, "simple_definition": 1, "cefr": 1}).to_list(200)}
+    ids = [w["id"] for w in bank.values()]
+    prog = {p["word_id"]: p.get("status", "NEW") for p in await db.user_word_progress.find(
+        {"user_id": user_id, "word_id": {"$in": ids}}, {"_id": 0}).to_list(500)}
+    known, learning, new = [], [], []
+    for hw in candidates:
+        b = bank.get(hw)
+        if b:
+            status = prog.get(b["id"], "NEW")
+            item = {"headword": hw, "in_bank": True, "id": b["id"],
+                    "simple_definition": b.get("simple_definition"), "cefr": b.get("cefr")}
+            if status in ("MASTERED", "RECALLING"):
+                known.append(item)
+            elif status in ("LEARNING", "SEEN"):
+                learning.append(item)
+            else:
+                new.append(item)
+        else:
+            new.append({"headword": hw, "in_bank": False, "id": None})
+    return {"known": known, "learning": learning, "new": new,
+            "counts": {"known": len(known), "learning": len(learning), "new": len(new)}}
+
+
+@api.post("/extract")
+async def extract_text(body: TextBody, user: dict = Depends(get_current_user)):
+    if not body.text or not body.text.strip():
+        raise HTTPException(status_code=400, detail="Please paste some text")
+    return await classify_words(user["user_id"], tokenize_vocab(body.text))
+
+
+@api.post("/extract-pdf")
+async def extract_pdf(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    from pypdf import PdfReader
+    import io
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF too large (max 8MB)")
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        text = " ".join((page.extract_text() or "") for page in reader.pages[:20])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not read that PDF")
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="No readable text found in the PDF")
+    return await classify_words(user["user_id"], tokenize_vocab(text))
+
+
+@api.post("/practice/build")
+async def practice_build(body: BuildBody, user: dict = Depends(get_current_user)):
+    # ensure all requested words exist (import non-bank ones), then build questions
+    resolved: List[str] = []
+    for token in body.word_ids[:20]:
+        wid = token if await db.words.find_one({"id": token}, {"_id": 1}) else await ensure_word(token)
+        if wid:
+            resolved.append(wid)
+    if not resolved:
+        return {"questions": [], "count": 0}
+    pool = await all_words_cache()
+    pool_by_id = {w["id"]: w for w in pool}
+    progresses = {p["word_id"]: p for p in await db.user_word_progress.find(
+        {"user_id": user["user_id"], "word_id": {"$in": resolved}}, {"_id": 0}).to_list(200)}
+    questions = []
+    for wid in resolved:
+        w = pool_by_id.get(wid)
+        if not w:
+            continue
+        mode = pick_mode(w, progresses.get(wid), pool)
+        q = build_question(w, mode, pool)
+        q["teach"] = progresses.get(wid, {}).get("status", "NEW") == "NEW"
+        q["card"] = {"headword": w["headword"], "phonetic": w.get("phonetic"),
+                     "simple_definition": w["simple_definition"], "easy_meaning": w.get("easy_meaning"),
+                     "example": w.get("example"), "cefr": w.get("cefr"),
+                     "part_of_speech": w.get("part_of_speech"), "synonyms": w.get("synonyms", [])[:3]}
+        questions.append(q)
+    await log_event(user["user_id"], "learning_session_started", {"source": "import", "count": len(questions)})
+    return {"questions": questions, "count": len(questions), "source": "import"}
+
+
 @api.get("/")
 async def root():
     return {"service": "vocably", "status": "ok"}
@@ -879,6 +1369,30 @@ async def seed_content():
         await db.topics.insert_many([dict(t) for t in TOPICS])
     if await db.exams.count_documents({}) == 0:
         await db.exams.insert_many([dict(e) for e in EXAMS])
+    if await db.articles.count_documents({}) == 0:
+        await db.articles.insert_many([dict(a) for a in ARTICLES])
+
+    # Merge AI-generated, validated word bank (idempotent upsert by id).
+    bank_path = os.path.join(ROOT_DIR, "word_bank.json")
+    if os.path.exists(bank_path):
+        try:
+            with open(bank_path) as f:
+                bank = json.load(f)
+        except Exception:
+            bank = []
+        for w in bank:
+            hw = str(w.get("headword", "")).strip().lower()
+            if not hw:
+                continue
+            wid = slugify(hw)
+            if await db.words.find_one({"id": wid}, {"_id": 1}):
+                continue
+            await db.words.update_one(
+                {"id": wid},
+                {"$set": {**w, "id": wid, "headword": hw, "status": "PUBLISHED",
+                          "provenance": "ai_generated", "created_at": now_utc()}},
+                upsert=True,
+            )
 
 
 @app.on_event("startup")

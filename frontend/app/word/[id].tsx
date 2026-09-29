@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, ScrollView, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import { View, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,7 +11,8 @@ import { Icon } from '@/src/components/Icon';
 import { CefrBadge } from '@/src/components/CefrBadge';
 import { Skeleton } from '@/src/components/Skeleton';
 import { useToast } from '@/src/components/Toast';
-import { api } from '@/src/api/client';
+import { api, ApiError, API } from '@/src/api/client';
+import { playAudioUrl } from '@/src/utils/audio';
 
 type WordRef = { id: string | null; headword: string; cefr?: string; simple_definition?: string };
 type Detail = {
@@ -35,6 +36,47 @@ export default function WordDetail() {
   const d = q.data;
   const w = d?.word;
 
+  const [audio, setAudio] = useState<{ us_url?: string | null; uk_url?: string | null; tts_url?: string | null } | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [coach, setCoach] = useState<{ explanation: string; example: string; mnemonic: string } | null>(null);
+  const [coachLoading, setCoachLoading] = useState(false);
+
+  const playPron = async (variant?: 'us' | 'uk') => {
+    let a = audio;
+    if (!a) {
+      setAudioLoading(true);
+      try {
+        a = await api<typeof audio>(`/words/${id}/audio`);
+        setAudio(a);
+      } catch {
+        toast.show('Audio unavailable', 'error');
+        setAudioLoading(false);
+        return;
+      }
+      setAudioLoading(false);
+    }
+    const url = variant === 'uk' ? a?.uk_url : variant === 'us' ? a?.us_url : (a?.us_url || a?.uk_url || a?.tts_url);
+    if (url) await playAudioUrl(url.startsWith('http') ? url : `${API}${url}`);
+    else toast.show('Audio unavailable', 'error');
+  };
+
+  const runCoach = async () => {
+    setCoachLoading(true);
+    try {
+      const res = await api<{ content: typeof coach }>(`/words/${id}/ai-coach`, { method: 'POST' });
+      setCoach(res.content);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 402) {
+        toast.show(e.message, 'info');
+        router.push('/paywall');
+      } else {
+        toast.show(e instanceof ApiError ? e.message : 'AI Coach failed', 'error');
+      }
+    } finally {
+      setCoachLoading(false);
+    }
+  };
+
   const toggleSave = async () => {
     if (!d) return;
     try {
@@ -51,12 +93,12 @@ export default function WordDetail() {
       {items.map((it, i) => (
         <Pressable
           key={`${it.headword}-${i}`}
-          disabled={!it.id}
-          onPress={() => it.id && router.push(`/word/${it.id}`)}
-          style={[styles.wordChip, !it.id && { opacity: 0.7 }]}
+          onPress={() => it.id ? router.push(`/word/${it.id}`) : router.push(`/(tabs)/discover?q=${encodeURIComponent(it.headword)}`)}
+          style={styles.wordChip}
           testID={`related-chip-${it.headword}`}
         >
           <AppText size={14} weight="medium" color={colors.onBrandTertiary}>{it.headword}</AppText>
+          <Icon name={it.id ? 'arrow-top-right' : 'magnify'} size={13} color={colors.brandSecondary} />
         </Pressable>
       ))}
     </View>
@@ -91,6 +133,19 @@ export default function WordDetail() {
             </View>
             {w.phonetic ? <AppText size={17} color={colors.muted} style={{ marginTop: 4 }}>{w.phonetic}</AppText> : null}
             <AppText size={14} color={colors.brandSecondary} weight="medium" style={{ marginTop: 4 }}>{w.part_of_speech}</AppText>
+
+            <View style={styles.pronRow}>
+              <Pressable testID="pron-listen" onPress={() => playPron()} style={styles.pronBtn}>
+                {audioLoading ? <ActivityIndicator size="small" color={colors.brand} /> : <Icon name="volume-high" size={18} color={colors.brand} />}
+                <AppText size={14} weight="medium" color={colors.brand}>Listen</AppText>
+              </Pressable>
+              {audio?.us_url ? (
+                <Pressable testID="pron-us" onPress={() => playPron('us')} style={styles.pronMini}><AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>US</AppText></Pressable>
+              ) : null}
+              {audio?.uk_url ? (
+                <Pressable testID="pron-uk" onPress={() => playPron('uk')} style={styles.pronMini}><AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>UK</AppText></Pressable>
+              ) : null}
+            </View>
             {d?.progress ? (
               <View style={styles.statusPill}>
                 <Icon name="progress-check" size={14} color={colors.brand} />
@@ -113,6 +168,28 @@ export default function WordDetail() {
               </View>
             </Section>
           ) : null}
+
+          <Section title="AI Coach">
+            {coach ? (
+              <Animated.View entering={FadeInDown.duration(240)} style={styles.coachBox}>
+                <View style={styles.coachRow}><Icon name="robot-happy-outline" size={18} color={colors.brand} /><AppText size={13} weight="medium" color={colors.brand}>Explanation</AppText></View>
+                <AppText size={15} style={{ lineHeight: 22, marginTop: 4 }}>{coach.explanation}</AppText>
+                <View style={[styles.coachRow, { marginTop: 14 }]}><Icon name="text-box-outline" size={18} color={colors.brand} /><AppText size={13} weight="medium" color={colors.brand}>Fresh example</AppText></View>
+                <AppText size={15} style={{ lineHeight: 22, marginTop: 4, fontStyle: 'italic' }}>{coach.example}</AppText>
+                <View style={[styles.coachRow, { marginTop: 14 }]}><Icon name="lightbulb-on-outline" size={18} color={colors.warning} /><AppText size={13} weight="medium" color={colors.brand}>Memory hook</AppText></View>
+                <AppText size={15} style={{ lineHeight: 22, marginTop: 4 }}>{coach.mnemonic}</AppText>
+              </Animated.View>
+            ) : (
+              <Pressable testID="ai-coach-button" onPress={runCoach} disabled={coachLoading} style={styles.coachCta}>
+                {coachLoading ? <ActivityIndicator size="small" color={colors.brand} /> : <Icon name="robot-happy-outline" size={20} color={colors.brand} />}
+                <View style={{ flex: 1 }}>
+                  <AppText size={15} weight="medium">{coachLoading ? 'Thinking…' : 'Explain this with AI'}</AppText>
+                  <AppText size={13} color={colors.muted} style={{ marginTop: 1 }}>Get a plain explanation, example & memory hook</AppText>
+                </View>
+                {!coachLoading ? <Icon name="chevron-right" size={20} color={colors.muted} /> : null}
+              </Pressable>
+            )}
+          </Section>
 
           {d?.graph.synonyms.length ? <Section title="Synonyms"><WordChips items={d.graph.synonyms} /></Section> : null}
           {d?.graph.antonyms.length ? <Section title="Antonyms"><WordChips items={d.graph.antonyms} /></Section> : null}
@@ -203,7 +280,13 @@ const useStyles = makeStyles((t) => ({
   sectionTitle: { marginBottom: t.spacing.sm, letterSpacing: 0.5 },
   quote: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: t.colors.surfaceTertiary, borderRadius: t.radius.md, padding: t.spacing.lg },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm },
-  wordChip: { backgroundColor: t.colors.brandTertiary, paddingHorizontal: t.spacing.lg, paddingVertical: 10, borderRadius: t.radius.pill },
+  wordChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.brandTertiary, paddingHorizontal: t.spacing.lg, paddingVertical: 10, borderRadius: t.radius.pill },
+  pronRow: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm, marginTop: t.spacing.md },
+  pronBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.brandTertiary, paddingHorizontal: t.spacing.lg, height: 40, borderRadius: t.radius.pill },
+  pronMini: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: t.colors.border, alignItems: 'center', justifyContent: 'center' },
+  coachBox: { backgroundColor: t.colors.surfaceTertiary, borderRadius: t.radius.md, padding: t.spacing.lg },
+  coachRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  coachCta: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md, backgroundColor: t.colors.surfaceSecondary, borderWidth: 1, borderColor: t.colors.border, borderRadius: t.radius.md, padding: t.spacing.lg },
   examChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.surfaceTertiary, paddingHorizontal: t.spacing.md, paddingVertical: 8, borderRadius: t.radius.pill },
   mnemonic: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: '#FBF6EC', borderRadius: t.radius.md, padding: t.spacing.lg },
   mistake: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: '#FBF0F0', borderRadius: t.radius.md, padding: t.spacing.lg },

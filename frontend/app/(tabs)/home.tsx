@@ -45,6 +45,7 @@ export default function Home() {
   const missionQ = useQuery({ queryKey: ['mission'], queryFn: () => api<Mission>('/mission') });
   const progressQ = useQuery({ queryKey: ['progress'], queryFn: () => api<Progress>('/progress') });
   const examsQ = useQuery({ queryKey: ['exams'], queryFn: () => api<any>('/exams') });
+  const slippingQ = useQuery({ queryKey: ['slipping'], queryFn: () => api<{ count: number; words: any[] }>('/review/slipping') });
 
   const refreshing = missionQ.isRefetching || progressQ.isRefetching;
   const onRefresh = () => { missionQ.refetch(); progressQ.refetch(); examsQ.refetch(); };
@@ -127,6 +128,22 @@ export default function Home() {
         </Card>
       </View>
 
+      {/* Smart review nudge */}
+      {slippingQ.data && slippingQ.data.count > 0 ? (
+        <Card style={styles.slipCard} onPress={() => router.push('/session?source=slipping')} testID="slipping-card">
+          <View style={[styles.statIcon, { backgroundColor: '#FBEAEA', marginBottom: 0 }]}>
+            <Icon name="clock-alert-outline" size={20} color={colors.error} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <AppText weight="medium" size={16}>Slipping from memory</AppText>
+            <AppText size={13} color={colors.muted} style={{ marginTop: 2 }}>
+              {slippingQ.data.count} word{slippingQ.data.count === 1 ? '' : 's'} to review before you forget
+            </AppText>
+          </View>
+          <Icon name="chevron-right" size={22} color={colors.muted} />
+        </Card>
+      ) : null}
+
       {/* Vocabulary progress */}
       <Card style={styles.progressCard} testID="vocab-progress-card">
         <View style={{ flex: 1 }}>
@@ -194,6 +211,7 @@ const useStyles = makeStyles((t) => ({
   missionRow: { flexDirection: 'row', gap: t.spacing.sm, flexWrap: 'wrap' },
   missionPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.surfaceSecondary, paddingHorizontal: t.spacing.md, paddingVertical: 7, borderRadius: t.radius.pill, borderWidth: 1, borderColor: t.colors.border },
   statsRow: { flexDirection: 'row', gap: t.spacing.md },
+  slipCard: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md },
   statCard: { flex: 1, gap: 4 },
   statIcon: { width: 40, height: 40, borderRadius: t.radius.md, alignItems: 'center', justifyContent: 'center', marginBottom: t.spacing.sm },
   progressCard: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md },
