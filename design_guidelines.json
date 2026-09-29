@@ -1,0 +1,194 @@
+{
+  "app_name": "Vocably",
+  "personality": "1 iOS-Native Clean (infused with Linear's crispness)",
+  "personality_one_liner": "A warm, hyper-focused, and premium learning environment that feels fast, smart, and deeply tailored to student success without childish gamification.",
+  "color": {
+    "surface": "#FDFDFB",
+    "onSurface": "#1A1A18",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1A1A18",
+    "surfaceTertiary": "#F4F4F2",
+    "onSurfaceTertiary": "#3D3D3A",
+    "surfaceInverse": "#2B2B29",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#4A7C59",
+    "onBrand": "#FFFFFF",
+    "brandPrimary": "#4A7C59",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#779C81",
+    "onBrandSecondary": "#132B1A",
+    "brandTertiary": "#E7F0E9",
+    "onBrandTertiary": "#294A34",
+    "success": "#3E7B51",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D19036",
+    "onWarning": "#FFFFFF",
+    "error": "#B54D4D",
+    "onError": "#FFFFFF",
+    "info": "#4A7C59",
+    "onInfo": "#FFFFFF",
+    "border": "#EBEBE8",
+    "borderStrong": "#D6D6D2",
+    "divider": "#F0F0EE",
+    "muted": "#73736E"
+  },
+  "typography": {
+    "displayFontFamily": "PlusJakartaSans-Medium",
+    "textFontFamily": "PlusJakartaSans-Regular",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous padding around content. Avoid dense dashboard-style layouts. 16px (lg) minimum horizontal padding on all screens.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Bottom tab bar",
+      "Sticky headers over scrolling content",
+      "Featured 'Today's Mission' card overlaying an abstract background image"
+    ],
+    "dont's": [
+      "Every button",
+      "Standard list rows or standard cards",
+      "Form inputs"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "haptics": {
+    "events": {
+      "tab_press": "light",
+      "primary_button_press": "medium",
+      "flashcard_flip": "light",
+      "answer_correct": "success",
+      "answer_incorrect": "error"
+    }
+  },
+  "screens": [
+    {
+      "name": "Onboarding",
+      "purpose": "Personalizes the journey and sets goals without overwhelming the user.",
+      "states": {
+        "loading": "Centered spinner with a calm message.",
+        "empty": "N/A",
+        "error": "Standard alert or inline error for network issues."
+      },
+      "layout": "Full-bleed steps. Question text at the top (display font). Large selectable pills for options (e.g. CEFR levels). 'Continue' button sticky at the bottom. Progress dots at the very top."
+    },
+    {
+      "name": "Home",
+      "purpose": "Provides a calm, highly focused entry point prioritizing 'Today's Mission'.",
+      "states": {
+        "loading": "Skeleton cards matching the exact layout of Mission and Progress cards.",
+        "empty": "N/A",
+        "error": "Error message with a 'Tap to retry' button."
+      },
+      "layout": "Personalized greeting header. Large 'Today's Mission' hero card (glass over abstract warm texture) with time/word count and a prominent 'START' button. Below, a clean circular progress ring for the daily goal and a streak counter card. Minimalist spacing, no clutter."
+    },
+    {
+      "name": "Learn",
+      "purpose": "The core interactive practice player.",
+      "states": {
+        "loading": "Skeleton for flashcard.",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Top: thin progress bar and a close 'X' button. Center: Layered flip-deck flashcard or multiple choice question. Bottom: Unified action banner (like Brilliant) housing feedback, hints, and the 'Next/Check' sticky button. Clean, distraction-free."
+    },
+    {
+      "name": "Word Detail",
+      "purpose": "Deep dive into a word's meaning, context, and usage.",
+      "states": {
+        "loading": "Skeleton text blocks.",
+        "empty": "N/A",
+        "error": "Error loading word details with a retry button."
+      },
+      "layout": "Oversized headword at top with muted phonetics below. Scrollable content: Meaning blocks, synonym/antonym chips (brandTertiary), example sentences in blockquote-style surfaceTertiary cards. Sticky bottom CTA containing 'Learn', 'Practice', and 'Save' actions."
+    },
+    {
+      "name": "Discover",
+      "purpose": "Browse vocabulary by topic, category, and CEFR level.",
+      "states": {
+        "loading": "Grid of skeleton cards.",
+        "empty": "Empty state illustration of a minimal plant with text 'No decks found'.",
+        "error": "Retry button."
+      },
+      "layout": "Search bar sticky at top with glass effect. Two-column flex grid for topic cards. Each card uses a brandTertiary tinted icon container instead of full images to remain calm and structured."
+    },
+    {
+      "name": "Exams Hub",
+      "purpose": "Track progress for specific competitive exams.",
+      "states": {
+        "loading": "Skeleton exam cards.",
+        "empty": "Empty state indicating no active exam goals.",
+        "error": "Retry button."
+      },
+      "layout": "Header with a minimal architecture image. Vertical list of exam cards. Each card shows the exam name, a countdown pill, target score, and a mastery progress bar. Logos use text initials inside a tinted circle (Tier 3 fallback)."
+    },
+    {
+      "name": "Profile",
+      "purpose": "User stats, streak calendar, achievements, and settings.",
+      "states": {
+        "loading": "Skeleton stats grid.",
+        "empty": "N/A",
+        "error": "Retry button."
+      },
+      "layout": "Top stats grid (Words mastered, streak, XP). Below, a contribution-style streak calendar. Next, list of achievements. Bottom-anchored settings and Pro upgrade. Clean and spaced."
+    }
+  ],
+  "images": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1619252584172-a83a949b6efd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGNhbG0lMjB3YXJtJTIwd2hpdGUlMjB0ZXh0dXJlJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3OTA2OTA0NzN8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Abstract calm warm white texture background"
+    },
+    "empty_state": {
+      "url": "https://images.unsplash.com/photo-1765854540946-838b653c3a76?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwxfHxjYWxtJTIwbWluaW1hbCUyMGxpbmUlMjBhcnQlMjBwbGFudCUyMG9yJTIwYm9vayUyMGlsbHVzdHJhdGlvbiUyMG9uJTIwd2hpdGV8ZW58MHx8fHwxNzkwNjkwNDczfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Calm minimal line art plant illustration"
+    },
+    "exams_header": {
+      "url": "https://images.unsplash.com/photo-1661264083807-5e6a54fb12da?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwxfHxzdHVkZW50JTIwc3R1ZHlpbmclMjBtaW5pbWFsJTIwYXJjaGl0ZWN0dXJlJTIwd2FybSUyMHdoaXRlfGVufDB8fHx8MTc5MDY5MDQ4MXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Minimal architecture in warm white"
+    }
+  },
+  "instructions_to_main_agent": [
+    "STRICT RULE: Maximum font weight allowed anywhere is 500. Use typography sizing (xl, 2xl) for hierarchy rather than bold text.",
+    "STRICT RULE: Absolutely NO blue, indigo, or purple colors. The design heavily relies on Warm Off-White, Dark Charcoal, and a single restrained Sage Green accent.",
+    "STRICT RULE: Emojis are banned. Use the Phosphor icon set for all iconography.",
+    "IMPLEMENTATION: Use '@expo-google-fonts/plus-jakarta-sans'. Only load and use weights 400 and 500.",
+    "EXAM LOGOS: The image selector failed to find official transparent logos for IELTS, TOEFL, SAT, GRE. You MUST use Fallback Tier 3: display the exam initials as text (e.g. 'SAT') centered inside a 'brandTertiary' tinted circle.",
+    "LAYOUT: On the 'Learn' screen, implement a unified bottom banner (similar to the 'Brilliant' app) that houses feedback, hints, and a sticky 'Check/Next' action button. It must remain anchored at the bottom (respecting the safe area).",
+    "CARDS: All feature cards and list rows should use 'brandTertiary'-tinted icon containers (rounded squares) for icons, creating a cohesive, premium look."
+  ]
+}

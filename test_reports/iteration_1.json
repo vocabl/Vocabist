@@ -1,0 +1,45 @@
+{
+  "summary": "Vocably backend + frontend tested end-to-end. Backend: 22/22 pytest cases pass (auth, onboarding, mission, words+filters, word detail+graph, save/unsave, topics, exams, exam detail, profile exam-goal, practice start (all 4 sources), practice answer/complete, progress). Frontend: welcome -> register -> 4-step onboarding -> home renders correctly; session player works (teach card, multiple-choice question, Check button, +10 XP correct feedback); learn/exams/discover/profile tabs all render with proper testIDs and data. UI bug found on Profile stats grid (text wraps character-per-line). Bottom-tab bar buttons have NO testID (tabBarButtonTestID missing) - limits automated tab navigation. React Native deprecation warnings: shadow* style props and pointerEvents prop. Router warning: 'No route named (auth) exists in nested children'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/words/{id}", "issue": "Knowledge-graph synonym/antonym/related lookups mostly return unresolved stubs (id=null) because seeded synonyms like 'diminish','lessen','subside' aren't themselves seeded as headwords. Content gap, not a code bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Profile stats grid", "issue": "Stat labels ('Mastered','Learned','Day streak','Accuracy') and values render with each character on its own line - looks like flex-direction/column width issue on the stat cards. See /tmp/tab_profile.png.", "testID": "stat-Mastered / stat-Learned / stat-Day streak / stat-Accuracy", "priority": "HIGH"},
+      {"component": "(tabs)/_layout.tsx bottom tab bar", "issue": "Tab buttons (Home/Learn/Exams/Discover/Profile) have no testID. Add tabBarButtonTestID via options={{ tabBarButtonTestID: 'tab-home' }} etc. so E2E can drive tab navigation.", "testID": "tab-home, tab-learn, tab-exams, tab-discover, tab-profile", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Welcome", "issues": ["Solid green primary + outlined secondary buttons look good and hit 44px touch target"]},
+      {"screen": "Session player", "issues": ["Teach card + Check/Continue flow is clean; correct-answer feedback strip renders +10 XP nicely"]}
+    ],
+    "react_native_issues": [
+      {"component": "Various", "issue": "'shadow*' style props are deprecated. Use 'boxShadow'. Console spams warnings on every screen."},
+      {"component": "Various", "issue": "'props.pointerEvents' is deprecated. Use style.pointerEvents."},
+      {"component": "app/_layout.tsx Stack", "issue": "Layout warns: 'No route named (auth) exists in nested children: [index, onboarding, session, (auth)/login, (auth)/register, (auth)/welcome, (tabs), exam/[slug], word/[id]]'. Likely leftover Stack.Screen name='(auth)' declaration; remove or replace with individual (auth)/* screens."}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_vocably_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix Profile stats grid - stat cards are collapsing to single-character-wide columns. Likely missing flex: 1 or flexBasis on each StatCard.",
+    "Add testID (tabBarButtonTestID) to each Tabs.Screen in app/(tabs)/_layout.tsx so E2E can navigate tabs.",
+    "Remove or fix the stale '(auth)' route registration in app/_layout.tsx to silence the 'No route named (auth) exists' warning.",
+    "Migrate deprecated shadow* style props to boxShadow and pointerEvents prop to style.pointerEvents (React Native web).",
+    "OPTIONAL content: add missing headword entries for common synonyms (diminish, lessen, subside, pervasive, etc.) so the knowledge graph resolves properly."
+  ],
+  "critical_code_review_comments": [
+    "server.py: /api/words/{word_id} treats word_id as slug ('abate') which matches seed. Works but consider validating id format.",
+    "server.py: pick_mode uses random.Random seeded with times_seen+hash - deterministic per user progress; good.",
+    "server.py: /api/practice/complete streak logic assumes last_active_date semantics; verified working (streak went 0->1)."
+  ],
+  "updated_files": ["/app/backend/tests/test_vocably_api.py"],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "~90% - all flows working; Profile stat card layout broken"},
+  "seed_data_creation": "None. Backend seeds 20 words/6 topics/6 exams on startup. Tests create per-run TEST_* users; no cleanup implemented but user_sessions auto-expire in 7 days.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend fully covered by /app/backend/tests/test_vocably_api.py (22 tests, uses EXPO_PUBLIC_BACKEND_URL). Demo user demo@vocably.app/demo1234 is onboarded with IELTS goal - safe to reuse. Register a fresh email per run for onboarding UI tests. Bottom-tab buttons need testID before UI can navigate via tabs; use direct URL /home /learn /exams /discover /profile as workaround.",
+  "rca_of_issue": "Profile stats layout bug: In profile.tsx the StatCard row uses flex layout where each stat is likely receiving width shrunk to content of a single character. Reproduction: login as demo, tap Profile tab. Expected: 4 stat tiles side-by-side with horizontal labels. Actual: tiles collapse into narrow columns showing each character on its own line. Fix likely in the StatCard container style: add flex: 1 and minWidth or use fixed width per card."
+}

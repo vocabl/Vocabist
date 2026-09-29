@@ -1,0 +1,287 @@
+import React, { useRef, useState } from 'react';
+import { View, Pressable, ScrollView, TextInput, Platform } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Haptics from 'expo-haptics';
+import Animated, { FadeIn, FadeInUp, SlideInRight } from 'react-native-reanimated';
+import { makeStyles, useTheme } from '@/src/theme';
+import { AppText } from '@/src/components/AppText';
+import { Button } from '@/src/components/Button';
+import { Icon } from '@/src/components/Icon';
+import { CefrBadge } from '@/src/components/CefrBadge';
+import { api } from '@/src/api/client';
+
+type Question = {
+  word_id: string; headword: string; mode: string; prompt: string; options: string[]; answer: string;
+  input?: string; hint?: string; teach?: boolean;
+  card: { headword: string; phonetic?: string; simple_definition: string; easy_meaning?: string; example?: string; cefr?: string; part_of_speech?: string; synonyms: string[] };
+};
+
+export default function Session() {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { source = 'mission', ref } = useLocalSearchParams<{ source?: string; ref?: string }>();
+
+  const startQ = useQuery({
+    queryKey: ['practice-start', source, ref],
+    queryFn: () => {
+      const params = new URLSearchParams({ source: String(source) });
+      if (ref) params.set('ref', String(ref));
+      return api<{ questions: Question[]; count: number }>(`/practice/start?${params.toString()}`, { method: 'POST' });
+    },
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+  const questions = startQ.data?.questions ?? [];
+  const [index, setIndex] = useState(0);
+  const [phase, setPhase] = useState<'teach' | 'question' | 'feedback'>('teach');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [typed, setTyped] = useState('');
+  const [isCorrect, setIsCorrect] = useState(false);
+  const [xpGain, setXpGain] = useState(0);
+  const [stats, setStats] = useState({ answered: 0, correct: 0 });
+  const [done, setDone] = useState(false);
+  const startedAt = useRef(Date.now());
+  const sessionStart = useRef(Date.now());
+
+  const q = questions[index];
+  const showTeach = phase === 'teach' && q?.teach;
+
+  const beginQuestion = () => {
+    startedAt.current = Date.now();
+    setPhase('question');
+  };
+
+  const check = async () => {
+    if (!q) return;
+    const ans = q.mode === 'spelling' ? typed.trim() : selected;
+    if (!ans) return;
+    const correct = ans.toLowerCase() === q.answer.toLowerCase();
+    setIsCorrect(correct);
+    setPhase('feedback');
+    setStats((s) => ({ answered: s.answered + 1, correct: s.correct + (correct ? 1 : 0) }));
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(correct ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error).catch(() => {});
+    }
+    try {
+      const res = await api<{ xp_gain: number }>('/practice/answer', {
+        method: 'POST',
+        body: { word_id: q.word_id, mode: q.mode, correct, response_time_ms: Date.now() - startedAt.current },
+      });
+      setXpGain(res.xp_gain);
+    } catch { /* ignore */ }
+  };
+
+  const nextQuestion = async () => {
+    if (index + 1 >= questions.length) {
+      try {
+        await api('/practice/complete', {
+          method: 'POST',
+          body: { answered: stats.answered, correct: stats.correct, duration_ms: Date.now() - sessionStart.current, source },
+        });
+      } catch { /* ignore */ }
+      qc.invalidateQueries({ queryKey: ['mission'] });
+      qc.invalidateQueries({ queryKey: ['progress'] });
+      qc.invalidateQueries({ queryKey: ['exams'] });
+      setDone(true);
+      return;
+    }
+    setIndex((i) => i + 1);
+    setSelected(null);
+    setTyped('');
+    setXpGain(0);
+    setPhase('teach');
+  };
+
+  // ---- states ----
+  if (startQ.isLoading) {
+    return <View style={styles.center}><Icon name="loading" size={30} color={colors.brand} /><AppText size={14} color={colors.muted} style={{ marginTop: 8 }}>Preparing your session…</AppText></View>;
+  }
+
+  if (done || questions.length === 0) {
+    const pct = stats.answered ? Math.round((stats.correct / stats.answered) * 100) : 0;
+    return (
+      <View style={[styles.summary, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}>
+        <Animated.View entering={FadeInUp} style={styles.summaryInner}>
+          <View style={styles.summaryIcon}><Icon name={questions.length === 0 ? 'check-all' : 'trophy'} size={40} color={colors.brand} /></View>
+          <AppText weight="semibold" size={26} style={{ marginTop: 20 }}>{questions.length === 0 ? 'All caught up!' : 'Session complete'}</AppText>
+          {questions.length === 0 ? (
+            <AppText size={15} color={colors.muted} style={styles.summarySub}>Nothing to practice here right now.</AppText>
+          ) : (
+            <>
+              <AppText size={15} color={colors.muted} style={styles.summarySub}>You answered {stats.correct} of {stats.answered} correctly.</AppText>
+              <View style={styles.summaryStats}>
+                <View style={styles.sStat}><AppText weight="semibold" size={24} color={colors.brand}>{pct}%</AppText><AppText size={12} color={colors.muted}>accuracy</AppText></View>
+                <View style={styles.sDivider} />
+                <View style={styles.sStat}><AppText weight="semibold" size={24} color={colors.warning}>+{stats.correct * 10 + (stats.answered - stats.correct) * 2}</AppText><AppText size={12} color={colors.muted}>XP earned</AppText></View>
+              </View>
+            </>
+          )}
+        </Animated.View>
+        <Button testID="session-done-button" label="Done" onPress={() => router.replace('/(tabs)/home')} />
+      </View>
+    );
+  }
+
+  const progress = (index + (phase === 'feedback' ? 1 : 0)) / questions.length;
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+      {/* top bar */}
+      <View style={styles.topBar}>
+        <Pressable testID="close-session-button" onPress={() => router.replace('/(tabs)/home')} hitSlop={10}>
+          <Icon name="close" size={26} color={colors.onSurface} />
+        </Pressable>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.max(4, progress * 100)}%` }]} />
+        </View>
+        <AppText size={13} weight="medium" color={colors.muted}>{index + 1}/{questions.length}</AppText>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {showTeach ? (
+          <Animated.View key={`teach-${index}`} entering={FadeIn.duration(200)} style={styles.teachCard} testID="teach-card">
+            <View style={styles.teachTop}>
+              <AppText size={13} weight="medium" color={colors.brand}>NEW WORD</AppText>
+              <CefrBadge level={q.card.cefr} small />
+            </View>
+            <AppText weight="semibold" size={36} style={{ marginTop: 12 }}>{q.card.headword}</AppText>
+            {q.card.phonetic ? <AppText size={16} color={colors.muted} style={{ marginTop: 4 }}>{q.card.phonetic}</AppText> : null}
+            <AppText size={13} color={colors.muted} style={{ marginTop: 2 }}>{q.card.part_of_speech}</AppText>
+            <View style={styles.teachDef}>
+              <AppText size={18} style={{ lineHeight: 26 }}>{q.card.simple_definition}</AppText>
+            </View>
+            {q.card.example ? (
+              <View style={styles.exampleBox}>
+                <Icon name="format-quote-open" size={18} color={colors.brandSecondary} />
+                <AppText size={15} color={colors.onSurfaceTertiary} style={{ flex: 1, fontStyle: 'italic', lineHeight: 22 }}>{q.card.example}</AppText>
+              </View>
+            ) : null}
+          </Animated.View>
+        ) : (
+          <Animated.View key={`q-${index}`} entering={SlideInRight.duration(220)}>
+            <AppText size={13} weight="medium" color={colors.muted} style={{ marginBottom: 8 }}>{modeLabel(q.mode)}</AppText>
+            <AppText weight="medium" size={22} style={styles.prompt}>{q.prompt}</AppText>
+
+            {q.mode === 'spelling' ? (
+              <View>
+                <TextInput
+                  testID="spelling-input"
+                  value={typed}
+                  onChangeText={setTyped}
+                  editable={phase !== 'feedback'}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="Type the word"
+                  placeholderTextColor={colors.muted}
+                  style={[styles.spellInput, phase === 'feedback' && (isCorrect ? styles.optCorrect : styles.optWrong)]}
+                />
+                {q.hint ? <AppText size={14} color={colors.muted} style={{ marginTop: 10 }}>Hint: {q.hint}</AppText> : null}
+              </View>
+            ) : (
+              <View style={{ gap: 12 }}>
+                {q.options.map((opt) => {
+                  const isSel = selected === opt;
+                  const isAns = opt.toLowerCase() === q.answer.toLowerCase();
+                  let optStyle = styles.opt;
+                  if (phase === 'feedback') {
+                    if (isAns) optStyle = { ...styles.opt, ...styles.optCorrect };
+                    else if (isSel) optStyle = { ...styles.opt, ...styles.optWrong };
+                  } else if (isSel) {
+                    optStyle = { ...styles.opt, ...styles.optSelected };
+                  }
+                  return (
+                    <Pressable
+                      key={opt}
+                      testID={`option-${opt}`}
+                      disabled={phase === 'feedback'}
+                      onPress={() => setSelected(opt)}
+                      style={optStyle}
+                    >
+                      <AppText size={16} weight="medium" color={colors.onSurface} style={{ flex: 1 }}>{opt}</AppText>
+                      {phase === 'feedback' && isAns ? <Icon name="check-circle" size={20} color={colors.success} /> : null}
+                      {phase === 'feedback' && isSel && !isAns ? <Icon name="close-circle" size={20} color={colors.error} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </Animated.View>
+        )}
+      </ScrollView>
+
+      {/* bottom banner */}
+      <View style={[
+        styles.banner,
+        { paddingBottom: insets.bottom + 16 },
+        phase === 'feedback' && (isCorrect ? styles.bannerCorrect : styles.bannerWrong),
+      ]}>
+        {phase === 'feedback' ? (
+          <Animated.View entering={FadeInUp.duration(180)} style={styles.feedback}>
+            <View style={styles.feedbackRow}>
+              <Icon name={isCorrect ? 'check-circle' : 'close-circle'} size={22} color={isCorrect ? colors.success : colors.error} />
+              <AppText weight="semibold" size={17} color={isCorrect ? colors.success : colors.error}>
+                {isCorrect ? `Correct! +${xpGain} XP` : 'Not quite'}
+              </AppText>
+            </View>
+            {!isCorrect ? <AppText size={14} color={colors.onSurfaceTertiary} style={{ marginTop: 4 }}>Answer: {q.answer}</AppText> : null}
+          </Animated.View>
+        ) : null}
+
+        {showTeach ? (
+          <Button testID="teach-continue-button" label="Practice this word" onPress={beginQuestion} />
+        ) : phase === 'question' ? (
+          <Button testID="check-button" label="Check" onPress={check} disabled={q.mode === 'spelling' ? !typed.trim() : !selected} />
+        ) : (
+          <Button testID="next-button" label={index + 1 >= questions.length ? 'Finish' : 'Continue'} onPress={nextQuestion} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function modeLabel(mode: string) {
+  return {
+    multiple_choice: 'Choose the meaning',
+    synonym_select: 'Pick the synonym',
+    true_false: 'True or false',
+    spelling: 'Spell it',
+    fill_blank: 'Fill the blank',
+  }[mode] ?? 'Question';
+}
+
+const useStyles = makeStyles((t) => ({
+  container: { flex: 1, backgroundColor: t.colors.surface },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface },
+  topBar: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md, paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md },
+  progressTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: t.colors.surfaceTertiary, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: t.colors.brand, borderRadius: 4 },
+  body: { padding: t.spacing.lg, paddingTop: t.spacing.md, flexGrow: 1 },
+  teachCard: { backgroundColor: t.colors.surfaceSecondary, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.border, padding: t.spacing.xl, ...t.shadow.sm },
+  teachTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  teachDef: { marginTop: t.spacing.lg },
+  exampleBox: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: t.colors.surfaceTertiary, borderRadius: t.radius.md, padding: t.spacing.lg, marginTop: t.spacing.lg },
+  prompt: { marginBottom: t.spacing.xl, lineHeight: 30 },
+  opt: { flexDirection: 'row', alignItems: 'center', backgroundColor: t.colors.surfaceSecondary, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.border, paddingVertical: t.spacing.lg, paddingHorizontal: t.spacing.lg, minHeight: 56 },
+  optSelected: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTertiary },
+  optCorrect: { borderColor: t.colors.success, backgroundColor: '#E8F2EC' },
+  optWrong: { borderColor: t.colors.error, backgroundColor: '#F7E9E9' },
+  spellInput: { backgroundColor: t.colors.surfaceSecondary, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.border, paddingHorizontal: t.spacing.lg, height: 58, fontFamily: t.fontFamily.medium, fontSize: 20, color: t.colors.onSurface },
+  banner: { paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.lg, borderTopWidth: 1, borderTopColor: t.colors.divider, backgroundColor: t.colors.surface },
+  bannerCorrect: { backgroundColor: '#EEF6F0', borderTopColor: '#D5E8DC' },
+  bannerWrong: { backgroundColor: '#FBF0F0', borderTopColor: '#EFD9D9' },
+  feedback: { marginBottom: t.spacing.md },
+  feedbackRow: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm },
+  summary: { flex: 1, backgroundColor: t.colors.surface, paddingHorizontal: t.spacing.xl, justifyContent: 'space-between' },
+  summaryInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  summaryIcon: { width: 88, height: 88, borderRadius: 44, backgroundColor: t.colors.brandTertiary, alignItems: 'center', justifyContent: 'center' },
+  summarySub: { marginTop: 8, textAlign: 'center' },
+  summaryStats: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.xl, marginTop: t.spacing.xxl },
+  sStat: { alignItems: 'center', gap: 2 },
+  sDivider: { width: 1, height: 40, backgroundColor: t.colors.border },
+}));

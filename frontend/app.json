@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Vocably",
+    "slug": "vocably",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "vocably",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vocably.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.vocably.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FDFDFB",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180
+        }
+      ],
+      "@react-native-vector-icons/material-design-icons"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
