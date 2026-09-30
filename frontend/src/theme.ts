@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 
 // ============================================================================
-// Vocably theme — light mode only. Tokens mirror design_guidelines.json.
+// Vocabist theme — light mode only. Tokens mirror design_guidelines.json.
 // ============================================================================
 
 export const colors = {

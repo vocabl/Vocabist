@@ -1,4 +1,4 @@
-"""Vocably iteration 2 - tests for new features:
+"""Vocabist iteration 2 - tests for new features:
 - Entitlements
 - Subscription activate/cancel
 - AI Coach (gpt-5.6-luna via emergent)
@@ -24,7 +24,7 @@ API = f"{BASE_URL}/api"
 
 
 def _register_onboard():
-    email = f"test_{uuid.uuid4().hex[:10]}@vocably.app"
+    email = f"test_{uuid.uuid4().hex[:10]}@vocabist.app"
     r = requests.post(f"{API}/auth/register", json={
         "email": email, "password": "TestPass123", "name": "TEST User"
     }, timeout=30)

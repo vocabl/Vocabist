@@ -1,4 +1,4 @@
-"""Vocably iteration 3 - tests for new features:
+"""Vocabist iteration 3 - tests for new features:
 - Read & Learn: /api/articles list + detail (with body)
 - Word lookup: bank hit + AI fallback (dictionary blocked in env)
 - Import word (AI fallback)
@@ -21,7 +21,7 @@ API = f"{BASE_URL}/api"
 
 
 def _register():
-    email = f"test_{uuid.uuid4().hex[:10]}@vocably.app"
+    email = f"test_{uuid.uuid4().hex[:10]}@vocabist.app"
     r = requests.post(f"{API}/auth/register", json={
         "email": email, "password": "TestPass123", "name": "TEST User"
     }, timeout=30)

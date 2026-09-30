@@ -1,4 +1,4 @@
-"""Vocably backend — FastAPI + MongoDB (Motor).
+"""Vocabist backend — FastAPI + MongoDB (Motor).
 
 Implements Phase 1–3: auth (email/password + Emergent Google), profile /
 onboarding, vocabulary engine, word detail + knowledge graph, saved words,
@@ -46,7 +46,7 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-app = FastAPI(title="Vocably API")
+app = FastAPI(title="Vocabist API")
 api = APIRouter(prefix="/api")
 
 EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
@@ -1349,7 +1349,7 @@ async def practice_build(body: BuildBody, user: dict = Depends(get_current_user)
 
 @api.get("/")
 async def root():
-    return {"service": "vocably", "status": "ok"}
+    return {"service": "vocabist", "status": "ok"}
 
 # ---------------------------------------------------------------------------
 # startup: indexes + seed

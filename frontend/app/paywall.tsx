@@ -47,7 +47,7 @@ export default function Paywall() {
       await api('/subscription/activate', { method: 'POST', body: { plan } });
       await refresh();
       qc.invalidateQueries();
-      toast.show('Welcome to Vocably Pro! 🎉', 'success');
+      toast.show('Welcome to Vocabist Pro! 🎉', 'success');
     } catch {
       toast.show('Could not activate. Try again.', 'error');
     } finally {
@@ -75,7 +75,7 @@ export default function Paywall() {
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.crown}><Icon name="crown" size={34} color={colors.warning} /></View>
-        <AppText weight="semibold" size={30} style={styles.title}>Vocably Pro</AppText>
+        <AppText weight="semibold" size={30} style={styles.title}>Vocabist Pro</AppText>
         <AppText size={16} color={colors.muted} style={styles.subtitle}>Unlock the full learning experience.</AppText>
 
         <View style={styles.benefits}>

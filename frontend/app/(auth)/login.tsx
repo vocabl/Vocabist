@@ -59,7 +59,7 @@ export default function Login() {
         </View>
 
         <Pressable testID="go-to-register-button" onPress={() => router.replace('/(auth)/register')} style={styles.link}>
-          <AppText size={15} color={colors.muted}>New to Vocably? </AppText>
+          <AppText size={15} color={colors.muted}>New to Vocabist? </AppText>
           <AppText size={15} weight="medium" color={colors.brand}>Create account</AppText>
         </Pressable>
       </KeyboardAwareScrollView>

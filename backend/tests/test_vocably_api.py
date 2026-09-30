@@ -1,4 +1,4 @@
-"""Vocably backend API test suite - covers all endpoints listed in review request."""
+"""Vocabist backend API test suite - covers all endpoints listed in review request."""
 import os
 import time
 import uuid
@@ -12,7 +12,7 @@ API = f"{BASE_URL}/api"
 @pytest.fixture(scope="session")
 def fresh_user():
     """Register a fresh user for a full onboarding + practice run."""
-    email = f"test_{uuid.uuid4().hex[:10]}@vocably.app"
+    email = f"test_{uuid.uuid4().hex[:10]}@vocabist.app"
     password = "TestPass123"
     r = requests.post(f"{API}/auth/register", json={
         "email": email, "password": password, "name": "TEST User"
@@ -45,7 +45,7 @@ def demo_headers():
 def test_health():
     r = requests.get(f"{API}/", timeout=15)
     assert r.status_code == 200
-    assert r.json().get("service") == "vocably"
+    assert r.json().get("service") == "vocabist"
 
 
 # ---------------- auth ----------------

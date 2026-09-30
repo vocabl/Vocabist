@@ -2,7 +2,7 @@ import { storage } from '@/src/utils/storage';
 
 const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL as string;
 export const API = `${BASE_URL}/api`;
-const TOKEN_KEY = 'vocably.token';
+const TOKEN_KEY = 'vocabist.token';
 
 let inMemoryToken: string | null = null;
 

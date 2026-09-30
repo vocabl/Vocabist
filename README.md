@@ -1,4 +1,4 @@
-# Vocably
+# Vocabist
 
 A mobile-first English vocabulary learning platform (Expo + FastAPI + MongoDB).
 

@@ -1,4 +1,4 @@
-"""Canonical seed content for Vocably: words, topics, exams, decks.
+"""Canonical seed content for Vocabist: words, topics, exams, decks.
 
 Content is intentionally structured (normalized fields) rather than one big JSON
 blob per word. This module is imported by server.py and used to (idempotently)

@@ -35,7 +35,7 @@ export default function Welcome() {
         <View style={styles.logo}>
           <Icon name="book-open-page-variant" size={34} color={colors.onBrand} />
         </View>
-        <AppText weight="semibold" size={40} style={styles.title}>Vocably</AppText>
+        <AppText weight="semibold" size={40} style={styles.title}>Vocabist</AppText>
         <AppText size={17} color={colors.muted} style={styles.tagline}>
           Learn the words that matter. A calm, personalized path to a powerful vocabulary.
         </AppText>

@@ -1,4 +1,4 @@
-# Vocably — Test Credentials
+# Vocabist — Test Credentials
 
 ## Email/Password test account
 - Email: `demo@vocably.app`

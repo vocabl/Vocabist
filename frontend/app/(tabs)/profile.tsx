@@ -106,7 +106,7 @@ export default function Profile() {
       <Card style={styles.proCard} testID="upgrade-pro-card">
         <View style={styles.proHead}>
           <Icon name={user?.tier === 'pro' ? 'crown' : 'crown-outline'} size={22} color={colors.warning} />
-          <AppText weight="semibold" size={17}>{user?.tier === 'pro' ? 'Vocably Pro · Active' : 'Vocably Pro'}</AppText>
+          <AppText weight="semibold" size={17}>{user?.tier === 'pro' ? 'Vocabist Pro · Active' : 'Vocabist Pro'}</AppText>
         </View>
         <AppText size={14} color={colors.onSurfaceTertiary} style={{ marginTop: 6, lineHeight: 20 }}>
           {user?.tier === 'pro'

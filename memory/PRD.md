@@ -1,4 +1,4 @@
-# Vocably — Product Requirements Document
+# Vocabist — Product Requirements Document
 
 ## Original Problem Statement
 Build a production-quality, mobile-first English vocabulary learning platform for school
