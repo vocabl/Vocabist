@@ -191,81 +191,11 @@ from adaptive_learning import (
 # question generation
 # ---------------------------------------------------------------------------
 
-MODES = ["multiple_choice", "synonym_select", "true_false", "spelling", "fill_blank"]
+from practice_engine import generate_question
 
 
 async def all_words_cache() -> List[dict]:
     return await db.words.find({"status": "PUBLISHED"}, {"_id": 0}).to_list(1000)
-
-
-def build_question(word: dict, mode: str, pool: List[dict]) -> dict:
-    others = [w for w in pool if w["id"] != word["id"]]
-    import random
-    rnd = random.Random(word["id"] + mode)
-
-    base = {"word_id": word["id"], "headword": word["headword"], "mode": mode,
-            "phonetic": word.get("phonetic"), "part_of_speech": word.get("part_of_speech")}
-
-    if mode == "multiple_choice":
-        distractors = rnd.sample(others, min(3, len(others)))
-        options = [word["simple_definition"]] + [d["simple_definition"] for d in distractors]
-        rnd.shuffle(options)
-        return {**base, "prompt": f"What does “{word['headword']}” mean?",
-                "options": options, "answer": word["simple_definition"]}
-
-    if mode == "synonym_select" and word.get("synonyms"):
-        correct = word["synonyms"][0]
-        distractors = rnd.sample(others, min(3, len(others)))
-        options = [correct] + [d["headword"] for d in distractors]
-        rnd.shuffle(options)
-        return {**base, "prompt": f"Which word is a synonym of “{word['headword']}”?",
-                "options": options, "answer": correct}
-
-    if mode == "true_false":
-        show_true = rnd.random() > 0.5
-        if show_true or not others:
-            shown_def = word["simple_definition"]
-            answer = "True"
-        else:
-            shown_def = rnd.choice(others)["simple_definition"]
-            answer = "False"
-        return {**base, "prompt": f"“{word['headword']}” means: {shown_def}",
-                "options": ["True", "False"], "answer": answer}
-
-    if mode == "spelling":
-        return {**base, "prompt": f"Spell the word that means: {word['simple_definition']}",
-                "options": [], "answer": word["headword"], "input": "text",
-                "hint": word["headword"][0] + "•" * (len(word["headword"]) - 1)}
-
-    if mode == "fill_blank":
-        example = word.get("easy_example") or word.get("example") or ""
-        pattern = re.compile(re.escape(word["headword"]), re.IGNORECASE)
-        blanked = pattern.sub("_____", example) if example else f"The word means {word['simple_definition']}: _____"
-        distractors = rnd.sample(others, min(3, len(others)))
-        options = [word["headword"]] + [d["headword"] for d in distractors]
-        rnd.shuffle(options)
-        return {**base, "prompt": f"Fill the blank:\n{blanked}",
-                "options": options, "answer": word["headword"]}
-
-    # fallback
-    return build_question(word, "multiple_choice", pool)
-
-
-def pick_mode(word: dict, progress: Optional[dict], pool: List[dict]) -> str:
-    status = (progress or {}).get("status", "NEW")
-    import random
-    rnd = random.Random((progress or {}).get("times_seen", 0) + hash(word["id"]) % 1000)
-    if status in ("NEW", "SEEN"):
-        return "multiple_choice"
-    if status == "LEARNING":
-        choices = ["multiple_choice", "true_false"]
-        if word.get("synonyms"):
-            choices.append("synonym_select")
-        return rnd.choice(choices)
-    if status == "RECALLING":
-        choices = ["fill_blank", "synonym_select" if word.get("synonyms") else "multiple_choice"]
-        return rnd.choice(choices)
-    return "spelling"
 
 # ---------------------------------------------------------------------------
 # auth routes
@@ -631,6 +561,7 @@ async def mission(user: dict = Depends(get_current_user)):
 async def practice_start(
     source: str = Query("mission"),
     ref: Optional[str] = None,
+    mode: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     pool = await all_words_cache()
@@ -672,16 +603,19 @@ async def practice_start(
         {"user_id": user["user_id"], "word_id": {"$in": word_ids}}, {"_id": 0}).to_list(1000)}
 
     questions = []
+    session_modes: List[str] = []
     for wid in word_ids:
         w = pool_by_id.get(wid)
         if not w:
             continue
-        mode = pick_mode(w, progresses.get(wid), pool)
-        q = build_question(w, mode, pool)
+        q = generate_question(w, pool, progresses.get(wid), requested_mode=mode, session_modes=session_modes)
+        if not q:
+            continue  # graceful skip: no valid question could be built for this word
+        session_modes.append(q["mode"])
         q["teach"] = progresses.get(wid, {}).get("status", "NEW") in ("NEW",) and source in ("mission", "exam", "topic")
         q["card"] = {
             "headword": w["headword"], "phonetic": w.get("phonetic"),
-            "simple_definition": w["simple_definition"], "easy_meaning": w.get("easy_meaning"),
+            "simple_definition": w.get("simple_definition"), "easy_meaning": w.get("easy_meaning"),
             "example": w.get("example"), "cefr": w.get("cefr"),
             "part_of_speech": w.get("part_of_speech"),
             "synonyms": w.get("synonyms", [])[:3],
@@ -1274,15 +1208,18 @@ async def practice_build(body: BuildBody, user: dict = Depends(get_current_user)
     progresses = {p["word_id"]: p for p in await db.user_word_progress.find(
         {"user_id": user["user_id"], "word_id": {"$in": resolved}}, {"_id": 0}).to_list(200)}
     questions = []
+    session_modes: List[str] = []
     for wid in resolved:
         w = pool_by_id.get(wid)
         if not w:
             continue
-        mode = pick_mode(w, progresses.get(wid), pool)
-        q = build_question(w, mode, pool)
+        q = generate_question(w, pool, progresses.get(wid), session_modes=session_modes)
+        if not q:
+            continue
+        session_modes.append(q["mode"])
         q["teach"] = progresses.get(wid, {}).get("status", "NEW") == "NEW"
         q["card"] = {"headword": w["headword"], "phonetic": w.get("phonetic"),
-                     "simple_definition": w["simple_definition"], "easy_meaning": w.get("easy_meaning"),
+                     "simple_definition": w.get("simple_definition"), "easy_meaning": w.get("easy_meaning"),
                      "example": w.get("example"), "cefr": w.get("cefr"),
                      "part_of_speech": w.get("part_of_speech"), "synonyms": w.get("synonyms", [])[:3]}
         questions.append(q)

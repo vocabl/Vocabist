@@ -84,13 +84,25 @@ level, goals, exams, study time, performance, mistakes, review history and maste
 - **Timezone:** all datetimes coerced to aware UTC; no naive arithmetic. User-local timezones out of scope (documented limitation) — UTC used consistently.
 - Tests: `backend/tests/test_adaptive_learning.py` (20 deterministic behaviors + API regression). Phase A+B+C+D+core: **86 passed, 1 skipped**. Feature suites: 25 passed, 1 skipped, 2 pre-existing failures (TTS relative-URL test bug; stateful `lookup_ai_fallback`) — unchanged.
 
+## Phase E — Practice Engine Expansion (2026-09-30)
+- **Reusable engine** `backend/practice_engine.py` (pure, deterministic, DB-free, no AI/randomness). `build_question`, `validate_question`, `select_practice_mode`, `generate_question` (selection + fallback), `score_answer`. `server.py` question loops now call the engine (old inline `build_question`/`pick_mode` removed); question shape preserved (`word_id/mode/prompt/options/answer/card/input/hint`) plus additive `question_id/correct_answer/difficulty/source/explanation/metadata`.
+- **13 modes:** multiple_choice, synonym_select, **antonym_select**, true_false, spelling, fill_blank, **definition_recall**, **sentence_completion**, **context_choice**, **word_usage**, **confusing_words**, **word_family**, **mixed_adaptive** (7 new). All generated from canonical records only.
+- **Distractors:** deterministic (seeded by word_id+mode), preferring same part-of-speech → CEFR proximity → same topic; unique, non-empty, never the answer; graceful `None` when insufficient canonical candidates (no fabrication).
+- **mixed_adaptive:** deterministic mode choice from Phase D state — NEW/SEEN→recognition (MC/TF), LEARNING→+fill_blank/synonym, RECALLING→recall/spelling/context, MASTERED→context/usage/family; confusing_words when a verified pair exists and the last answer was wrong. Returns reason codes (`high_recognition`, `weak_recall`, `needs_context`, `mastery_challenge`, `confusing_pair`, `recent_error`). Session-level mode history avoids repeating the last two modes when an equal alternative exists.
+- **Validation & fallback:** rejects missing word/answer/prompt, duplicate/empty options, answer-absent, self-distractor, insufficient distractors, or missing canonical relationship; a rejected mode falls back through MC→TF→fill_blank→spelling→definition_recall→synonym→context, and words that can build nothing are skipped (never crashes).
+- **Answer evaluation:** deterministic normalization (case/whitespace/punctuation). Option modes → normalized equality; spelling → exact normalized word; definition_recall → token-overlap ≥0.6 (no exact-sentence requirement). No LLM.
+- **Phase D integration:** unchanged single source of progression — questions flow into `practice/answer` → `adaptive_update_progress`. Engine only generates/evaluates; it does not compute mastery/intervals.
+- **Content limitation:** 231-word bank means relation-heavy modes (antonym/confusing/family/usage/context) often can't build and fall back — expected; nothing is fabricated. `practice/start` gained an optional `mode` query param.
+- **DB:** no new collections/fields; mode history is session-local. XP pipeline unchanged.
+- Tests: `backend/tests/test_practice_engine.py` (25 behaviors + API regression). Full A+B+C+D+E+core: **101 passed, 1 skipped**. Feature suites: 25 passed, 1 skipped, 2 pre-existing failures — unchanged.
+
 ## Backlog (prioritized)
-- **P0 (next, Phase E):** practice-mode architecture — clean question-mode registry so new modes (antonym, type-definition, sentence completion, context, audio recognition, usage, short written) can be added without rewriting the engine; adaptive engine chooses the mode.
-- **P1:** exam/PYQ/curriculum architecture (F–H); AI provider abstraction (K).
-- **P2:** production security (P), admin/content (O), offline (M), web (Q), Supabase/Postgres decision (R), real IAP/RevenueCat (S).
+- **P0 (next, Phase F):** exam platform architecture (IELTS/TOEFL/SAT/GRE/GMAT/… metadata, study plans, countdown, words/day) — no fabricated exam content.
+- **P1:** PYQ architecture (G); curriculum architecture (H); AI provider abstraction (K).
+- **P2:** production security (P), admin/content (O), offline (M), web (Q), Supabase/Postgres decision (R), real IAP/RevenueCat (S). Relation-heavy practice modes improve automatically as the canonical bank grows.
 
 ## Next Tasks
-1. Phase E — practice-mode architecture.
-2. Phase F — exam platform expansion.
+1. Phase F — exam platform expansion.
+2. Phase G — verified PYQ architecture.
 3. Phase K — AI provider abstraction.
 
