@@ -42,14 +42,21 @@ level, goals, exams, study time, performance, mistakes, review history and maste
 - **Learn From Anything:** `/api/extract` (pasted text) and `/api/extract-pdf` (PDF upload via pypdf) classify vocabulary KNOWN/LEARNING/NEW; selected new words start a session via `source=list` (imports non-bank words on the fly).
 - **Smart Review Nudges:** `/api/review/slipping` surfaces words due/overdue with low mastery; Home "Slipping from memory" card starts `source=slipping` review. Review engine now promotes any attempted word out of NEW → SEEN so first-wrong words are nudged.
 
+## Phase A — Canonical Vocabulary Architecture (2026-09-30)
+- **Canonical identity:** every word now has a `canonical_key` (normalized headword) with a **unique index** preventing duplicate canonical words; existing `id`/`headword` and all legacy fields preserved unchanged.
+- **Schema module** `backend/vocab_schema.py` (pure, DB-free, Postgres-portable): `normalize_headword`, `canonical_id`, `build_relations`, `build_meanings`, `build_pronunciation`, `to_canonical_storage`, `new_canonical_word`.
+- **Canonical relations:** embedded `relations` block resolves synonyms/antonyms/related/confusing_words to canonical word **refs** (`{ref, headword}`) instead of bare strings; morphological lists (word_family/roots/prefixes/suffixes) kept as strings. `/api/words/{id}` graph now uses refs (headword fallback) — same response shape, additive `confusing_words`.
+- **Capability fields (additive):** `meanings[]` (multi-meaning/POS), `pronunciation{us,uk}` (IPA+audio), `translations`, `school_relevance`, `contextual_examples` placeholders; legacy flat fields (`simple_definition`, `phonetic`, `synonyms[]`…) untouched so all consumers keep working.
+- **Idempotent backfill** `migrate_canonical()` at startup upgraded all 231 words to `schema_version:1`; `ensure_word`/import dedupe by `canonical_key`.
+- Tests: `backend/tests/test_canonical_vocab.py` (schema unit tests + API canonical identity / ref resolution / duplicate prevention / no-regression). No frontend/UI changes.
+
 ## Backlog (prioritized)
-- **P0:** Expand canonical word bank (seed synonyms as real headwords so graph chips are all tappable); more words per exam/topic.
-- **P1:** AI features (explanations, mnemonics, example generation, quiz gen, reading passages) via Emergent key; Read & Learn; Learn From Anything (PDF/image/text extraction).
-- **P1:** Audio pronunciation (US/UK) + audio caching.
-- **P2:** Full entitlement/paywall + IAP (RevenueCat), offline packs/sync, admin content system, PYQ system, school/curriculum system, leaderboards, SEO web.
+- **P0 (next, Phase B):** content ingestion/validation pipeline + provenance (CURATED/AI_GENERATED/IMPORTED/ADMIN_CREATED) + content lifecycle (DRAFT/REVIEW/PUBLISHED/ARCHIVED); validation for duplicates/invalid relations/missing definitions/CEFR/exam refs before scaling the word bank.
+- **P1 (Phase C+):** strengthen knowledge graph (backfill relation refs when new targets are added; resolve confusing-word/word-family targets); adaptive engine signals; practice-mode architecture; exam/PYQ/curriculum architecture; AI provider abstraction.
+- **P2:** production security, admin/content system, offline foundation, web platform, Supabase/Postgres migration decision, real IAP/RevenueCat.
 
 ## Next Tasks
-1. Grow vocabulary content and cross-link the knowledge graph.
-2. Add AI-powered word explanations and example generation.
-3. Add pronunciation audio.
-4. Build the paywall + Pro entitlement gating.
+1. Phase B — content ingestion/validation architecture + provenance/lifecycle (do NOT mass-generate words yet).
+2. Phase C — knowledge-graph strengthening (canonical ref backfill for new words).
+3. Phase D — adaptive learning engine signals.
+

@@ -22,6 +22,11 @@ from passlib.context import CryptContext
 from dotenv import load_dotenv
 
 from seed_data import WORDS, TOPICS, EXAMS, ARTICLES
+from vocab_schema import (
+    normalize_headword,
+    to_canonical_storage,
+    new_canonical_word,
+)
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
@@ -515,17 +520,33 @@ async def word_detail(word_id: str, user: dict = Depends(get_current_user)):
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
 
-    async def resolve(names: List[str]) -> List[dict]:
+    proj = {"_id": 0, "id": 1, "headword": 1, "cefr": 1, "simple_definition": 1}
+    rels = w.get("relations") or {}
+
+    async def resolve(field: str) -> List[dict]:
+        # Prefer canonical relation refs; fall back to legacy string arrays.
+        entries = rels.get(field)
+        if entries is None:
+            entries = [{"ref": None, "headword": h} for h in (w.get(field, []) or [])]
         out = []
-        for n in names or []:
-            match = await db.words.find_one({"headword": n.lower()}, {"_id": 0, "id": 1, "headword": 1, "cefr": 1, "simple_definition": 1})
-            out.append(match if match else {"headword": n, "id": None})
+        for e in entries:
+            hw = e.get("headword") if isinstance(e, dict) else str(e)
+            ref = e.get("ref") if isinstance(e, dict) else None
+            match = None
+            if ref:
+                match = await db.words.find_one({"id": ref}, proj)
+            if not match and hw:
+                key = normalize_headword(hw)
+                match = await db.words.find_one(
+                    {"$or": [{"canonical_key": key}, {"headword": hw.lower()}]}, proj)
+            out.append(match if match else {"headword": hw, "id": None})
         return out
 
     graph = {
-        "synonyms": await resolve(w.get("synonyms", [])),
-        "antonyms": await resolve(w.get("antonyms", [])),
-        "related": await resolve(w.get("related", [])),
+        "synonyms": await resolve("synonyms"),
+        "antonyms": await resolve("antonyms"),
+        "related": await resolve("related"),
+        "confusing_words": await resolve("confusing_words"),
     }
     exams = await db.exams.find({"slug": {"$in": w.get("exam_relevance", [])}}, {"_id": 0}).to_list(20)
     saved = await db.saved_words.find_one({"user_id": user["user_id"], "word_id": word_id})
@@ -1224,27 +1245,26 @@ async def lookup(word: str = Query(...), user: dict = Depends(get_current_user))
 
 
 async def ensure_word(headword: str) -> Optional[str]:
-    """Return a word id for `headword`, creating an imported entry if needed."""
+    """Return a word id for `headword`, creating an imported entry if needed.
+
+    Dedupe against the canonical key so the same word (differing only by case or
+    punctuation) never becomes a second canonical record.
+    """
     norm = re.sub(r"[^a-z]", "", headword.lower())
     if not norm:
         return None
-    w = await db.words.find_one({"headword": norm}, {"_id": 0, "id": 1})
-    if w:
-        return w["id"]
+    ckey = normalize_headword(headword)
+    existing = await db.words.find_one(
+        {"$or": [{"canonical_key": ckey}, {"headword": norm}]}, {"_id": 0, "id": 1})
+    if existing:
+        return existing["id"]
     d = await dictionary_lookup(norm)
     if not d:
         return None
-    wid = slugify(norm)
-    await db.words.update_one(
-        {"id": wid},
-        {"$set": {"id": wid, "headword": norm, "cefr": "B1", "topic": "everyday",
-                  "frequency": 3, "academic_importance": 2, "exam_relevance": [],
-                  "synonyms": [], "antonyms": [], "related": [],
-                  "easy_meaning": d["simple_definition"], "status": "PUBLISHED",
-                  "provenance": "imported", "created_at": now_utc(), **d}},
-        upsert=True,
-    )
-    return wid
+    doc = new_canonical_word(norm, d, provenance="imported", status="PUBLISHED")
+    doc["created_at"] = now_utc()
+    await db.words.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
+    return doc["id"]
 
 
 @api.post("/words/import")
@@ -1395,6 +1415,33 @@ async def seed_content():
             )
 
 
+async def migrate_canonical():
+    """Idempotently upgrade every word to the canonical schema (Phase A).
+
+    Preserves each word's existing ``id``, ``headword`` and all legacy fields;
+    only computes ``canonical_key`` + ``relations`` (with canonical refs) and
+    backfills structured ``meanings`` / ``pronunciation`` + optional placeholders.
+    Words already at the current schema version are skipped, so re-runs are cheap.
+    """
+    all_words = await db.words.find({}, {"_id": 0}).to_list(200000)
+    id_by_key: dict = {}
+    for w in all_words:
+        key = normalize_headword(w.get("headword", ""))
+        if key and key not in id_by_key:
+            id_by_key[key] = w["id"]
+
+    pending = [w for w in all_words if w.get("schema_version") != 1 or not w.get("canonical_key")]
+    migrated = 0
+    for w in pending:
+        try:
+            await db.words.update_one({"id": w["id"]}, {"$set": to_canonical_storage(w, id_by_key)})
+            migrated += 1
+        except Exception as e:  # pragma: no cover
+            print(f"[canonical] migrate failed for {w.get('id')}: {e}")
+    if migrated:
+        print(f"[canonical] migrated {migrated} word(s) to schema v1")
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
@@ -1413,6 +1460,12 @@ async def startup():
     await db.profiles.create_index("user_id", unique=True)
     await db.analytics_events.create_index("user_id")
     await seed_content()
+    await migrate_canonical()
+    # Uniqueness safeguard against duplicate canonical words (after backfill).
+    try:
+        await db.words.create_index("canonical_key", unique=True)
+    except Exception as e:  # pragma: no cover
+        print(f"[canonical] canonical_key unique index skipped: {e}")
 
 
 app.include_router(api)
