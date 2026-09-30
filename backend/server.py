@@ -27,6 +27,7 @@ from vocab_schema import (
     to_canonical_storage,
 )
 from content_ingest import ingest_word, migrate_content_lifecycle
+from graph_service import build_word_graph, resolve_all_relationship_refs
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
@@ -520,34 +521,7 @@ async def word_detail(word_id: str, user: dict = Depends(get_current_user)):
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
 
-    proj = {"_id": 0, "id": 1, "headword": 1, "cefr": 1, "simple_definition": 1}
-    rels = w.get("relations") or {}
-
-    async def resolve(field: str) -> List[dict]:
-        # Prefer canonical relation refs; fall back to legacy string arrays.
-        entries = rels.get(field)
-        if entries is None:
-            entries = [{"ref": None, "headword": h} for h in (w.get(field, []) or [])]
-        out = []
-        for e in entries:
-            hw = e.get("headword") if isinstance(e, dict) else str(e)
-            ref = e.get("ref") if isinstance(e, dict) else None
-            match = None
-            if ref:
-                match = await db.words.find_one({"id": ref}, proj)
-            if not match and hw:
-                key = normalize_headword(hw)
-                match = await db.words.find_one(
-                    {"$or": [{"canonical_key": key}, {"headword": hw.lower()}]}, proj)
-            out.append(match if match else {"headword": hw, "id": None})
-        return out
-
-    graph = {
-        "synonyms": await resolve("synonyms"),
-        "antonyms": await resolve("antonyms"),
-        "related": await resolve("related"),
-        "confusing_words": await resolve("confusing_words"),
-    }
+    graph = await build_word_graph(db, w)
     exams = await db.exams.find({"slug": {"$in": w.get("exam_relevance", [])}}, {"_id": 0}).to_list(20)
     saved = await db.saved_words.find_one({"user_id": user["user_id"], "word_id": word_id})
     prog = await db.user_word_progress.find_one({"user_id": user["user_id"], "word_id": word_id}, {"_id": 0})
@@ -1462,6 +1436,7 @@ async def startup():
     await seed_content()
     await migrate_canonical()
     await migrate_content_lifecycle(db)
+    await resolve_all_relationship_refs(db)
     # Uniqueness safeguard against duplicate canonical words (after backfill).
     try:
         await db.words.create_index("canonical_key", unique=True)

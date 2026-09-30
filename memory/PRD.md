@@ -59,13 +59,24 @@ level, goals, exams, study time, performance, mistakes, review history and maste
 - **Dev tooling:** `backend/content_report.py` read-only quality pass (found 4 pre-existing AI-bank SELF_REFERENCE issues; left untouched per spec).
 - Tests: `backend/tests/test_content_pipeline.py` (validation units + async ingestion + API no-regression). No UI/engine/schema-breaking changes.
 
+## Phase C — Knowledge Graph + Relationship Integrity (2026-09-30)
+- **Reusable graph module** `backend/graph_service.py` (pure logic DB-free where practical; minimal Motor coupling): normalization, integrity, one-hop graph, migration, targeted re-resolution, metrics.
+- **Canonical relationship model:** every relation entry resolves to `{ref: <canonical id|null>, headword}`. Resolution priority: valid existing `ref` → `canonical_key` from headword → normalized-headword lookup → `null`. Handles legacy strings/objects/ids. Never invents IDs.
+- **Integrity rules** (`check_relationship_integrity` → `{valid, errors, warnings, normalized_relations}`): self-reference removed/flagged; duplicate targets within a type removed deterministically (first kept); malformed entries flagged; unknown relation types flagged; unresolved refs kept as `ref:null` but detectable; same target across different relation types allowed; case/whitespace normalized. Morphological fields (word_family/roots/prefixes/suffixes) preserved verbatim.
+- **Repair migration** `resolve_all_relationship_refs()` (idempotent, startup + callable): normalized all words; writes only the `relations` field when it changes; never alters word IDs, definitions, CEFR, pronunciation, provenance, lifecycle status, user progress, saved words, sessions, analytics. Repaired the 4 historical AI self-references (`order/schedule/encounter/postulate`) — removed only the self-ref, kept the legitimate related word (e.g. order→delivery). Bank self-references now **0**.
+- **Automatic re-resolution:** `refresh_refs_for_new_key()` runs after each ingestion (bounded query, no full scan on requests) to fill previously-unresolved refs that now point to a newly added canonical word.
+- **Graph service** `build_word_graph()`: bounded one-hop, resolved IDs + display headwords, no duplicate nodes, no self-node, deterministic order, graceful unresolved handling (`{headword, id:null}`). Powers `GET /api/words/{id}` (same response shape; `confusing_words` additive). No multi-hop.
+- **Quality report** extended with relationship metrics: total (1582), by type (syn 689/ant 456/rel 437/conf 0), resolved refs (91), unresolved (1491 — targets outside the 231-word bank; resolve as vocabulary grows), self-refs 0, duplicates 0, malformed 0, words-with-no-relationships, oversized sets.
+- **Known unresolved behavior:** unresolved refs are expected and non-fatal — the word bank is small, so most relation targets aren't canonical words yet; they display by headword and auto-link later via targeted refresh. No UI change required.
+- Tests: `backend/tests/test_graph_relationships.py` (resolution, integrity, migration idempotency/preservation, targeted refresh, graph builder, API regression). Phase A+B+C+core: **70 passed, 1 skipped**. Feature suites: 25 passed, 1 skipped, 2 pre-existing failures (TTS relative-URL test bug; stateful `lookup_ai_fallback`) — unchanged.
+
 ## Backlog (prioritized)
-- **P0 (next, Phase C):** strengthen knowledge graph — re-resolve relation refs when new targets appear; resolve confusing-word/word-family targets; clean the 4 flagged SELF_REFERENCE records via a content-review pass (not auto).
-- **P1:** adaptive engine signals (Phase D); practice-mode architecture (Phase E); exam/PYQ/curriculum architecture (Phases F–H); AI provider abstraction (Phase K).
-- **P2:** production security (Phase P), admin/content system (Phase O), offline (Phase M), web (Phase Q), Supabase/Postgres decision (Phase R), real IAP/RevenueCat (Phase S).
+- **P0 (next, Phase D):** adaptive learning-engine signals (mastery/confidence/mistakes/exam-relevance-aware selection) — deterministic, explainable, no AI dependency.
+- **P1:** practice-mode architecture (Phase E); exam/PYQ/curriculum architecture (Phases F–H); AI provider abstraction (Phase K).
+- **P2:** production security (P), admin/content system (O), offline (M), web (Q), Supabase/Postgres decision (R), real IAP/RevenueCat (S). As the bank grows, unresolved relationship refs will steadily resolve via the Phase C targeted-refresh path.
 
 ## Next Tasks
-1. Phase C — knowledge-graph strengthening (canonical ref backfill + relation cleanup).
-2. Phase D — adaptive learning engine signals.
-3. Phase E — practice-mode architecture.
+1. Phase D — adaptive learning engine signals.
+2. Phase E — practice-mode architecture.
+3. Phase F — exam platform expansion.
 

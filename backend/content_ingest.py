@@ -25,6 +25,7 @@ from content_validation import (
     standardize_provenance,
     CONTENT_STATUS_SET,
 )
+from graph_service import refresh_refs_for_new_key, relationship_quality_metrics
 
 
 def _now():
@@ -121,6 +122,9 @@ async def ingest_word(
     # keep shared context consistent for deterministic bulk runs
     context["id_by_key"][ckey] = wid
     context["known_word_ids"].add(wid)
+
+    # targeted re-resolution: fill previously-unresolved refs now pointing here
+    await refresh_refs_for_new_key(db, ckey, wid)
     return {"action": "created", "id": wid, "status": status, "validation": res.to_dict()}
 
 
@@ -188,6 +192,7 @@ async def quality_report(db) -> Dict[str, Any]:
         "invalid_status": invalid_status,
         "issues_by_code": issues_by_code,
         "invalid_samples": invalid[:50],
+        "relationships": await relationship_quality_metrics(db),
     }
 
 
