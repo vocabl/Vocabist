@@ -25,8 +25,8 @@ from seed_data import WORDS, TOPICS, EXAMS, ARTICLES
 from vocab_schema import (
     normalize_headword,
     to_canonical_storage,
-    new_canonical_word,
 )
+from content_ingest import ingest_word, migrate_content_lifecycle
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
@@ -1261,10 +1261,10 @@ async def ensure_word(headword: str) -> Optional[str]:
     d = await dictionary_lookup(norm)
     if not d:
         return None
-    doc = new_canonical_word(norm, d, provenance="imported", status="PUBLISHED")
-    doc["created_at"] = now_utc()
-    await db.words.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
-    return doc["id"]
+    raw = {"headword": norm, "cefr": "B1", "topic": "everyday", "frequency": 3,
+           "academic_importance": 2, "easy_meaning": d.get("simple_definition"), **d}
+    outcome = await ingest_word(db, raw, provenance="IMPORTED")
+    return outcome.get("id")
 
 
 @api.post("/words/import")
@@ -1382,7 +1382,7 @@ async def seed_content():
         for w in WORDS:
             wid = slugify(w["headword"])
             docs.append({**w, "id": wid, "headword": w["headword"].lower(),
-                         "status": "PUBLISHED", "provenance": "seed", "created_at": now_utc()})
+                         "status": "PUBLISHED", "provenance": "CURATED", "created_at": now_utc()})
         if docs:
             await db.words.insert_many(docs)
     if await db.topics.count_documents({}) == 0:
@@ -1410,7 +1410,7 @@ async def seed_content():
             await db.words.update_one(
                 {"id": wid},
                 {"$set": {**w, "id": wid, "headword": hw, "status": "PUBLISHED",
-                          "provenance": "ai_generated", "created_at": now_utc()}},
+                          "provenance": "AI_GENERATED", "created_at": now_utc()}},
                 upsert=True,
             )
 
@@ -1461,6 +1461,7 @@ async def startup():
     await db.analytics_events.create_index("user_id")
     await seed_content()
     await migrate_canonical()
+    await migrate_content_lifecycle(db)
     # Uniqueness safeguard against duplicate canonical words (after backfill).
     try:
         await db.words.create_index("canonical_key", unique=True)

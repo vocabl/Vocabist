@@ -50,13 +50,22 @@ level, goals, exams, study time, performance, mistakes, review history and maste
 - **Idempotent backfill** `migrate_canonical()` at startup upgraded all 231 words to `schema_version:1`; `ensure_word`/import dedupe by `canonical_key`.
 - Tests: `backend/tests/test_canonical_vocab.py` (schema unit tests + API canonical identity / ref resolution / duplicate prevention / no-regression). No frontend/UI changes.
 
+## Phase B — Content Ingestion & Validation Pipeline (2026-09-30)
+- **Standardized provenance:** `CURATED / AI_GENERATED / IMPORTED / ADMIN_CREATED`. Idempotent `migrate_content_lifecycle()` mapped legacy values (seed→CURATED 20, ai_generated→AI_GENERATED 210, imported→IMPORTED 1), preserving originals in `provenance_original`.
+- **Content lifecycle:** `DRAFT / REVIEW / PUBLISHED / ARCHIVED` on the existing `status` field. All 231 existing words stay PUBLISHED (never downgraded) so the live app is unchanged; new AI content enters REVIEW and is excluded by the existing `{status:"PUBLISHED"}` filters. Added `lifecycle_version:1` guard.
+- **Validation module** `backend/content_validation.py` (pure, DB-free, Postgres-portable): `validate_word()` → `ValidationResult{valid,errors,warnings,normalized_data}`. Errors block publication; warnings allow REVIEW. Checks identity/canonical_key/duplicates, definitions, meanings/pronunciation structure, CEFR (A1–C2), relations (self-ref, malformed, duplicate, broken ref), exam refs (verified against real exams; never invents), provenance/status/metadata.
+- **Ingestion service** `backend/content_ingest.py`: `ingest_word` (normalize→canonical_key→dedupe→validate→persist-when-permitted; never overwrites trusted content), `bulk_ingest` (deterministic, idempotent, per-record results, no partial corruption), `resolve_status` (AI_GENERATED→REVIEW always; IMPORTED→PUBLISHED to preserve import behavior; CURATED/ADMIN warnings downgrade PUBLISHED→REVIEW), `quality_report`, `migrate_content_lifecycle`.
+- **`/api/words/import`** now routes through `ingest_word` (IMPORTED) — same behavior: existing→returns canonical id, new+defined→PUBLISHED; dedupe by canonical_key.
+- **Dev tooling:** `backend/content_report.py` read-only quality pass (found 4 pre-existing AI-bank SELF_REFERENCE issues; left untouched per spec).
+- Tests: `backend/tests/test_content_pipeline.py` (validation units + async ingestion + API no-regression). No UI/engine/schema-breaking changes.
+
 ## Backlog (prioritized)
-- **P0 (next, Phase B):** content ingestion/validation pipeline + provenance (CURATED/AI_GENERATED/IMPORTED/ADMIN_CREATED) + content lifecycle (DRAFT/REVIEW/PUBLISHED/ARCHIVED); validation for duplicates/invalid relations/missing definitions/CEFR/exam refs before scaling the word bank.
-- **P1 (Phase C+):** strengthen knowledge graph (backfill relation refs when new targets are added; resolve confusing-word/word-family targets); adaptive engine signals; practice-mode architecture; exam/PYQ/curriculum architecture; AI provider abstraction.
-- **P2:** production security, admin/content system, offline foundation, web platform, Supabase/Postgres migration decision, real IAP/RevenueCat.
+- **P0 (next, Phase C):** strengthen knowledge graph — re-resolve relation refs when new targets appear; resolve confusing-word/word-family targets; clean the 4 flagged SELF_REFERENCE records via a content-review pass (not auto).
+- **P1:** adaptive engine signals (Phase D); practice-mode architecture (Phase E); exam/PYQ/curriculum architecture (Phases F–H); AI provider abstraction (Phase K).
+- **P2:** production security (Phase P), admin/content system (Phase O), offline (Phase M), web (Phase Q), Supabase/Postgres decision (Phase R), real IAP/RevenueCat (Phase S).
 
 ## Next Tasks
-1. Phase B — content ingestion/validation architecture + provenance/lifecycle (do NOT mass-generate words yet).
-2. Phase C — knowledge-graph strengthening (canonical ref backfill for new words).
-3. Phase D — adaptive learning engine signals.
+1. Phase C — knowledge-graph strengthening (canonical ref backfill + relation cleanup).
+2. Phase D — adaptive learning engine signals.
+3. Phase E — practice-mode architecture.
 
