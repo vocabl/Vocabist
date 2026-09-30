@@ -70,13 +70,27 @@ level, goals, exams, study time, performance, mistakes, review history and maste
 - **Known unresolved behavior:** unresolved refs are expected and non-fatal — the word bank is small, so most relation targets aren't canonical words yet; they display by headword and auto-link later via targeted refresh. No UI change required.
 - Tests: `backend/tests/test_graph_relationships.py` (resolution, integrity, migration idempotency/preservation, targeted refresh, graph builder, API regression). Phase A+B+C+core: **70 passed, 1 skipped**. Feature suites: 25 passed, 1 skipped, 2 pre-existing failures (TTS relative-URL test bug; stateful `lookup_ai_fallback`) — unchanged.
 
+## Phase D — Adaptive Learning Engine (2026-09-30)
+- **Pure engine** `backend/adaptive_learning.py` (deterministic, DB-free, no AI/randomness; every decision carries explainable `reason_codes`). Integrated into `practice/answer`, mission due-ranking, and Smart Review Nudges. MongoDB queries stay in `server.py`.
+- **Signals used:** accuracy (lifetime + rolling `recent_results` window of 10), consistency (consecutive_correct), response time (normalized vs the learner's own average with sparse-history damping; omitted when absent), exposure (times_seen), current status, review timing (overdue/due/upcoming), and vocabulary metadata (CEFR/frequency/exam relevance — never equated directly to learner difficulty).
+- **Mastery (0–100):** correct → `+12·diminish·speed_w (+3 if prev interval ≥7d)`, `diminish=1−0.75·mastery/100` (diminishing gains); wrong → `−(12+0.13·mastery)` (max −25). One miss never destroys, one hit never masters. First correct ≈ 11.
+- **Confidence (0–100):** correct → `8 + min(consec,5)·1.2 + (speed−0.6)·8`, diminishing near top; wrong → `−18` (`−28` if the word was MASTERED). Tracks reliability separately from mastery.
+- **Difficulty (0–1):** <2 exposures → deterministic CEFR prior (0.2–0.8); else blend of error-rate/low-mastery/low-confidence/slowness with a light prior. Personal, not CEFR.
+- **Interval (days, bounds 1–180):** fail → relearn in 10 min (interval 0); success → base growth by consecutive `[1,1,2,4,8,16,32,60,100,180]` × strength(mastery+confidence 0.6–1.5) × (1.2−0.5·difficulty), capped at 2 days when confidence <40.
+- **Status thresholds:** MASTERED = mastery≥85 ∧ confidence≥80 ∧ consecutive≥4; RECALLING = mastery≥55; LEARNING = mastery≥25; SEEN = attempted; NEW = never. Reaching MASTERED needs ~10–11 sustained correct recalls; a mastered failure demotes to RECALLING (moderate) or LEARNING (severe), never resets.
+- **Priority (0–1):** `0.32·overdue + 0.24·weakness + 0.16·low_conf + 0.12·recent_error + 0.10·status_weight + 0.06·exam_boost` — exam relevance is capped so it never overrides evidence. Returns reason codes.
+- **Slipping (0–1):** `0.4·failed_after_long_interval + 0.25·(low_conf∧mid_mastery) + 0.2·recent_error_rate + 0.15·overdue`. Used only for ranking nudges (candidate set still the due-within-2-days, mastery<90 words, preserving existing behavior). Does not notify.
+- **Fields added (additive, lazy defaults):** `difficulty`, `confidence_score` (already existed), `recent_results` (capped 10), `last_reason_codes`. No migration of existing progress; missing fields default safely. `practice/answer` response gains additive `confidence_score`, `difficulty`, `reason_codes`.
+- **Timezone:** all datetimes coerced to aware UTC; no naive arithmetic. User-local timezones out of scope (documented limitation) — UTC used consistently.
+- Tests: `backend/tests/test_adaptive_learning.py` (20 deterministic behaviors + API regression). Phase A+B+C+D+core: **86 passed, 1 skipped**. Feature suites: 25 passed, 1 skipped, 2 pre-existing failures (TTS relative-URL test bug; stateful `lookup_ai_fallback`) — unchanged.
+
 ## Backlog (prioritized)
-- **P0 (next, Phase D):** adaptive learning-engine signals (mastery/confidence/mistakes/exam-relevance-aware selection) — deterministic, explainable, no AI dependency.
-- **P1:** practice-mode architecture (Phase E); exam/PYQ/curriculum architecture (Phases F–H); AI provider abstraction (Phase K).
-- **P2:** production security (P), admin/content system (O), offline (M), web (Q), Supabase/Postgres decision (R), real IAP/RevenueCat (S). As the bank grows, unresolved relationship refs will steadily resolve via the Phase C targeted-refresh path.
+- **P0 (next, Phase E):** practice-mode architecture — clean question-mode registry so new modes (antonym, type-definition, sentence completion, context, audio recognition, usage, short written) can be added without rewriting the engine; adaptive engine chooses the mode.
+- **P1:** exam/PYQ/curriculum architecture (F–H); AI provider abstraction (K).
+- **P2:** production security (P), admin/content (O), offline (M), web (Q), Supabase/Postgres decision (R), real IAP/RevenueCat (S).
 
 ## Next Tasks
-1. Phase D — adaptive learning engine signals.
-2. Phase E — practice-mode architecture.
-3. Phase F — exam platform expansion.
+1. Phase E — practice-mode architecture.
+2. Phase F — exam platform expansion.
+3. Phase K — AI provider abstraction.
 

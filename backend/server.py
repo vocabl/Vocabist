@@ -178,73 +178,14 @@ class ExamGoalBody(BaseModel):
     daily_minutes: Optional[int] = None
 
 # ---------------------------------------------------------------------------
-# spaced review engine (deterministic, upgradeable)
+# spaced review engine — delegated to the pure adaptive learning engine
+# (see backend/adaptive_learning.py). Kept deterministic and explainable.
 # ---------------------------------------------------------------------------
-
-INTERVALS_DAYS = [0, 1, 3, 7, 16, 35, 70]  # by consecutive_correct index
-
-
-def status_from_mastery(score: float, consecutive: int) -> str:
-    if score >= 90 and consecutive >= 4:
-        return "MASTERED"
-    if score >= 60:
-        return "RECALLING"
-    if score >= 25:
-        return "LEARNING"
-    if score > 0:
-        return "SEEN"
-    return "NEW"
-
-
-def compute_review(prev: Optional[dict], correct: bool, response_time_ms: int) -> dict:
-    p = prev or {}
-    times_seen = p.get("times_seen", 0) + 1
-    times_correct = p.get("times_correct", 0) + (1 if correct else 0)
-    times_wrong = p.get("times_wrong", 0) + (0 if correct else 1)
-    consecutive = p.get("consecutive_correct", 0)
-    mastery = float(p.get("mastery_score", 0))
-    confidence = float(p.get("confidence_score", 0))
-
-    if correct:
-        consecutive += 1
-        gain = 18 if response_time_ms and response_time_ms < 6000 else 12
-        mastery = min(100.0, mastery + gain)
-        confidence = min(100.0, confidence + 15)
-    else:
-        consecutive = 0
-        mastery = max(0.0, mastery - 20)
-        confidence = max(0.0, confidence - 25)
-
-    idx = min(consecutive, len(INTERVALS_DAYS) - 1)
-    interval_days = INTERVALS_DAYS[idx] if correct else 0
-
-    status = status_from_mastery(mastery, consecutive)
-    if status == "NEW" and times_seen >= 1:
-        status = "SEEN"  # a word the learner has attempted is never "new" again
-    if not correct:
-        next_review = now_utc() + timedelta(minutes=10)
-    elif interval_days == 0:
-        next_review = now_utc() + timedelta(hours=8)
-    else:
-        next_review = now_utc() + timedelta(days=interval_days)
-
-    prev_avg = p.get("average_response_time", 0) or 0
-    avg_rt = response_time_ms if not prev_avg else int((prev_avg + response_time_ms) / 2)
-
-    return {
-        "times_seen": times_seen,
-        "times_correct": times_correct,
-        "times_wrong": times_wrong,
-        "consecutive_correct": consecutive,
-        "mastery_score": round(mastery, 1),
-        "confidence_score": round(confidence, 1),
-        "review_interval": interval_days,
-        "last_reviewed_at": now_utc(),
-        "next_review_at": next_review,
-        "average_response_time": avg_rt,
-        "status": status,
-        "updated_at": now_utc(),
-    }
+from adaptive_learning import (
+    update_progress as adaptive_update_progress,
+    select_learning_priority,
+    calculate_slipping,
+)
 
 # ---------------------------------------------------------------------------
 # question generation
@@ -629,14 +570,15 @@ async def select_mission_words(user: dict) -> dict:
     progresses = await db.user_word_progress.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(3000)
     seen_ids = {p["word_id"] for p in progresses}
 
-    # due for review
+    # due for review — ranked by the adaptive priority engine
     due = [p for p in progresses if ensure_aware(p.get("next_review_at")) and ensure_aware(p["next_review_at"]) <= now and p.get("status") != "MASTERED"]
-
-    def due_priority(p):
-        overdue = (now - ensure_aware(p["next_review_at"])).total_seconds()
-        exam_boost = 0
-        return (-p.get("mastery_score", 0), -overdue, exam_boost)
-    due.sort(key=due_priority)
+    active_exam = prof.get("exam_slug")
+    due_meta = {w["id"]: w for w in await db.words.find(
+        {"id": {"$in": [p["word_id"] for p in due]}}, {"_id": 0}).to_list(3000)} if due else {}
+    for p in due:
+        pr = select_learning_priority(p, due_meta.get(p["word_id"], {}), now, active_exam)
+        p["_priority"] = pr["priority"]
+    due.sort(key=lambda p: -p["_priority"])
     due_ids = [p["word_id"] for p in due][:target]
 
     # new words filtered by exam/level
@@ -753,7 +695,8 @@ async def practice_start(
 @api.post("/practice/answer")
 async def practice_answer(body: AnswerBody, user: dict = Depends(get_current_user)):
     prev = await db.user_word_progress.find_one({"user_id": user["user_id"], "word_id": body.word_id}, {"_id": 0})
-    updated = compute_review(prev, body.correct, body.response_time_ms)
+    word_meta = await db.words.find_one({"id": body.word_id}, {"_id": 0}) or {}
+    updated = adaptive_update_progress(prev, body.correct, body.response_time_ms, word_meta, now_utc())
     updated_full = {"user_id": user["user_id"], "word_id": body.word_id, **updated}
     if not prev:
         updated_full["created_at"] = now_utc()
@@ -772,7 +715,9 @@ async def practice_answer(body: AnswerBody, user: dict = Depends(get_current_use
     await log_event(user["user_id"], "answer_submitted", {"word_id": body.word_id, "correct": body.correct, "mode": body.mode})
 
     return {"status": updated["status"], "mastery_score": updated["mastery_score"],
+            "confidence_score": updated["confidence_score"], "difficulty": updated["difficulty"],
             "xp_gain": xp_gain, "just_mastered": just_mastered,
+            "reason_codes": updated["last_reason_codes"],
             "next_review_at": updated["next_review_at"].isoformat()}
 
 
@@ -1087,19 +1032,23 @@ class BuildBody(BaseModel):
 
 
 async def slipping_word_ids(user_id: str) -> List[str]:
-    horizon = now_utc() + timedelta(days=2)
+    now = now_utc()
+    horizon = now + timedelta(days=2)
     progresses = await db.user_word_progress.find(
         {"user_id": user_id, "status": {"$in": ["SEEN", "LEARNING", "RECALLING"]}}, {"_id": 0}
     ).to_list(3000)
-    at_risk = [p for p in progresses
-               if ensure_aware(p.get("next_review_at")) and ensure_aware(p["next_review_at"]) <= horizon
-               and p.get("mastery_score", 0) < 90]
+    # candidate set: due soon (within horizon) and not yet solid — preserves the
+    # existing nudge behavior; the adaptive slipping score is used for ranking.
+    candidates = [p for p in progresses
+                  if ensure_aware(p.get("next_review_at")) and ensure_aware(p["next_review_at"]) <= horizon
+                  and p.get("mastery_score", 0) < 90]
 
-    def risk(p):
-        overdue = (now_utc() - ensure_aware(p["next_review_at"])).total_seconds()
-        return (-overdue, p.get("mastery_score", 0), -p.get("times_wrong", 0))
-    at_risk.sort(key=risk)
-    return [p["word_id"] for p in at_risk][:20]
+    def rank(p):
+        s = calculate_slipping(p, now)["slipping_score"]
+        overdue = (now - ensure_aware(p["next_review_at"])).total_seconds()
+        return (-s, -overdue, p.get("mastery_score", 0))
+    candidates.sort(key=rank)
+    return [p["word_id"] for p in candidates][:20]
 
 
 @api.get("/review/slipping")
