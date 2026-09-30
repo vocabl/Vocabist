@@ -5,7 +5,7 @@ import uuid
 import requests
 import pytest
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://5b516477-854d-46aa-bd10-1d35bd3bc7f3.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vocabist-staging.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 
