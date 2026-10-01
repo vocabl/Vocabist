@@ -148,55 +148,64 @@ def test_resolve_status_ai_never_published():
 import asyncio  # noqa: E402
 
 
-def _run_with_db(body):
-    """Run an async test body with a Motor db bound to a fresh event loop."""
+def _run_with_repo(body):
+    """Run an async test body with a MongoRepository (new API) + raw Motor db
+    for direct verification queries.  Both are passed to body(repo, raw_db).
+    """
     async def _wrap():
         from motor.motor_asyncio import AsyncIOMotorClient
+        from db.mongo_repo import MongoRepository
         client = AsyncIOMotorClient(os.environ["MONGO_URL"])
-        db = client[os.environ.get("DB_NAME", "vocably")]
+        raw_db = client[os.environ.get("DB_NAME", "vocably")]
+        repo = MongoRepository()
         try:
-            return await body(db)
+            return await body(repo, raw_db)
         finally:
             client.close()
     return asyncio.run(_wrap())
 
 
+# Keep backward alias for graph_service tests that still pass (db, ...) directly.
+def _run_with_db(body):
+    return _run_with_repo(lambda repo, db: body(db))
+
+
 def test_ingest_dedupes_existing():
-    async def body(db):
-        out = await ingest_word(db, {"headword": "ABATE", "simple_definition": "x"},
+    async def body(repo, db):
+        out = await ingest_word(repo, {"headword": "ABATE", "simple_definition": "x"},
                                 provenance="ADMIN_CREATED")
         assert out["action"] == "exists"
         assert out["id"] == "abate"
-    _run_with_db(body)
+    _run_with_repo(body)
 
 
 def test_ingest_ai_enters_review_and_is_idempotent():
-    async def body(db):
+    async def body(repo, db):
         hw = f"zztest{uuid.uuid4().hex[:8]}"
         rec = {"headword": hw, "simple_definition": "a synthetic test word", "cefr": "B2", "topic": "test"}
         try:
-            out1 = await ingest_word(db, rec, provenance="AI_GENERATED", requested_status="PUBLISHED")
+            out1 = await ingest_word(repo, rec, provenance="AI_GENERATED", requested_status="PUBLISHED")
             assert out1["action"] == "created"
             assert out1["status"] == "REVIEW"  # AI never auto-publishes
             assert await db.words.count_documents({"id": out1["id"], "status": "PUBLISHED"}) == 0
-            out2 = await ingest_word(db, rec, provenance="AI_GENERATED")
+            out2 = await ingest_word(repo, rec, provenance="AI_GENERATED")
             assert out2["action"] == "exists" and out2["id"] == out1["id"]
         finally:
             await db.words.delete_one({"headword": hw})
-    _run_with_db(body)
+    _run_with_repo(body)
 
 
 def test_ingest_rejects_invalid_without_writing():
-    async def body(db):
+    async def body(repo, db):
         hw = f"zzbad{uuid.uuid4().hex[:8]}"
-        out = await ingest_word(db, {"headword": hw, "cefr": "ZZ"}, provenance="ADMIN_CREATED")
+        out = await ingest_word(repo, {"headword": hw, "cefr": "ZZ"}, provenance="ADMIN_CREATED")
         assert out["action"] == "rejected"
         assert await db.words.count_documents({"headword": hw}) == 0
-    _run_with_db(body)
+    _run_with_repo(body)
 
 
 def test_bulk_ingest_reports_per_record():
-    async def body(db):
+    async def body(repo, db):
         prefix = f"zzblk{uuid.uuid4().hex[:6]}"
         records = [
             {"headword": f"{prefix}one", "simple_definition": "def one", "cefr": "B1", "topic": "t"},
@@ -204,26 +213,26 @@ def test_bulk_ingest_reports_per_record():
             {"headword": f"{prefix}bad", "cefr": "NOPE"},                       # invalid
         ]
         try:
-            summary = await bulk_ingest(db, records, provenance="AI_GENERATED")
+            summary = await bulk_ingest(repo, records, provenance="AI_GENERATED")
             assert summary["total"] == 3
             assert summary["created"] == 1
             assert summary["exists"] == 1
             assert summary["rejected"] == 1
         finally:
             await db.words.delete_many({"headword": {"$regex": f"^{prefix}"}})
-    _run_with_db(body)
+    _run_with_repo(body)
 
 
 def test_lifecycle_migration_idempotent_and_nondestructive():
-    async def body(db):
+    async def body(repo, db):
         # existing words are standardized + PUBLISHED, never downgraded
-        assert await migrate_content_lifecycle(db) == 0  # already migrated at startup
+        assert await migrate_content_lifecycle(repo) == 0  # already migrated at startup
         a = await db.words.find_one({"id": "abate"},
                                     {"_id": 0, "status": 1, "provenance": 1, "lifecycle_version": 1})
         assert a["status"] == "PUBLISHED"
         assert a["provenance"] in {"CURATED", "AI_GENERATED", "IMPORTED", "ADMIN_CREATED"}
         assert a["lifecycle_version"] == 1
-    _run_with_db(body)
+    _run_with_repo(body)  # body uses both repo (for lifecycle) and raw db (for verification)
 
 
 # --------------------------- API no-regression ---------------------------

@@ -36,12 +36,28 @@ KNOWN = set(ID_BY_KEY.values())
 
 
 def _run_with_db(body):
+    """Legacy shim: pass only a raw Motor db to body(db)."""
     async def _wrap():
         from motor.motor_asyncio import AsyncIOMotorClient
         client = AsyncIOMotorClient(os.environ["MONGO_URL"])
         db = client[os.environ.get("DB_NAME", "vocably")]
         try:
             return await body(db)
+        finally:
+            client.close()
+    return asyncio.run(_wrap())
+
+
+def _run_with_repo(body):
+    """Run body(repo, db) — MongoRepository + raw Motor db for direct verification."""
+    async def _wrap():
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from db.mongo_repo import MongoRepository
+        client = AsyncIOMotorClient(os.environ["MONGO_URL"])
+        db = client[os.environ.get("DB_NAME", "vocably")]
+        repo = MongoRepository()
+        try:
+            return await body(repo, db)
         finally:
             client.close()
     return asyncio.run(_wrap())
@@ -116,90 +132,80 @@ def test_unresolved_ref_is_detectable():
 
 # ------------------------- C. migration (async) -------------------------
 def test_migration_idempotent_and_repaired_self_refs():
-    def body(db):
-        async def inner():
-            # startup already ran it; a fresh run must not change anything
-            stats = await resolve_all_relationship_refs(db)
-            assert stats["updated"] == 0, f"expected idempotent, got {stats}"
-            # the 4 historical self-refs are gone; legit targets preserved
-            for wid, kept in [("order", "delivery"), ("schedule", "calendar"),
-                              ("encounter", "encountered"), ("postulate", "assumption")]:
-                w = await db.words.find_one({"id": wid}, {"_id": 0, "relations": 1})
-                rel = w["relations"]["related"]
-                assert all((e["headword"] or "").lower() != wid for e in rel)
-                assert any(e["headword"] == kept for e in rel)
-            return True
-        return inner()
-    assert _run_with_db(body)
+    async def body(repo, db):
+        # startup already ran it; a fresh run must not change anything
+        stats = await resolve_all_relationship_refs(repo)
+        assert stats["updated"] == 0, f"expected idempotent, got {stats}"
+        # the 4 historical self-refs are gone; legit targets preserved
+        for wid, kept in [("order", "delivery"), ("schedule", "calendar"),
+                          ("encounter", "encountered"), ("postulate", "assumption")]:
+            w = await db.words.find_one({"id": wid}, {"_id": 0, "relations": 1})
+            rel = w["relations"]["related"]
+            assert all((e["headword"] or "").lower() != wid for e in rel)
+            assert any(e["headword"] == kept for e in rel)
+        return True
+    assert _run_with_repo(body)
 
 
 def test_migration_preserves_ids_and_progress_counts():
-    def body(db):
-        async def inner():
-            before_ids = await db.words.count_documents({})
-            before_prog = await db.user_word_progress.count_documents({})
-            before_saved = await db.saved_words.count_documents({})
-            await resolve_all_relationship_refs(db)
-            assert await db.words.count_documents({}) == before_ids
-            assert await db.user_word_progress.count_documents({}) == before_prog
-            assert await db.saved_words.count_documents({}) == before_saved
-            return True
-        return inner()
-    assert _run_with_db(body)
+    async def body(repo, db):
+        before_ids = await db.words.count_documents({})
+        before_prog = await db.user_word_progress.count_documents({})
+        before_saved = await db.saved_words.count_documents({})
+        await resolve_all_relationship_refs(repo)
+        assert await db.words.count_documents({}) == before_ids
+        assert await db.user_word_progress.count_documents({}) == before_prog
+        assert await db.saved_words.count_documents({}) == before_saved
+        return True
+    assert _run_with_repo(body)
 
 
 def test_targeted_refresh_resolves_new_key():
-    def body(db):
-        async def inner():
-            src = f"zzsrc{uuid.uuid4().hex[:6]}"
-            tgt = f"zztgt{uuid.uuid4().hex[:6]}"
-            # a word that relates to a not-yet-existing target (ref null)
-            await db.words.insert_one({
-                "id": src, "headword": src, "canonical_key": src, "status": "PUBLISHED",
-                "simple_definition": "x", "provenance": "CURATED",
-                "relations": {"synonyms": [{"ref": None, "headword": tgt}],
-                              "antonyms": [], "related": [], "confusing_words": []}})
-            try:
-                # now the target canonical word appears
-                updated = await refresh_refs_for_new_key(db, tgt, tgt)
-                assert updated == 1
-                w = await db.words.find_one({"id": src}, {"_id": 0, "relations": 1})
-                assert w["relations"]["synonyms"][0]["ref"] == tgt
-            finally:
-                await db.words.delete_one({"id": src})
-            return True
-        return inner()
-    assert _run_with_db(body)
+    async def body(repo, db):
+        src = f"zzsrc{uuid.uuid4().hex[:6]}"
+        tgt = f"zztgt{uuid.uuid4().hex[:6]}"
+        # a word that relates to a not-yet-existing target (ref null)
+        await db.words.insert_one({
+            "id": src, "headword": src, "canonical_key": src, "status": "PUBLISHED",
+            "simple_definition": "x", "provenance": "CURATED",
+            "relations": {"synonyms": [{"ref": None, "headword": tgt}],
+                          "antonyms": [], "related": [], "confusing_words": []}})
+        try:
+            # now the target canonical word appears
+            updated = await refresh_refs_for_new_key(repo, tgt, tgt)
+            assert updated == 1
+            w = await db.words.find_one({"id": src}, {"_id": 0, "relations": 1})
+            assert w["relations"]["synonyms"][0]["ref"] == tgt
+        finally:
+            await db.words.delete_one({"id": src})
+        return True
+    assert _run_with_repo(body)
 
 
 # ------------------------- D. graph service (async) -------------------------
 def test_graph_builder_no_dupes_no_self():
-    def body(db):
-        async def inner():
-            w = await db.words.find_one({"id": "abate"}, {"_id": 0})
-            g = await build_word_graph(db, w)
-            for field in ("synonyms", "antonyms", "related", "confusing_words"):
-                assert field in g
-                ids = [n["id"] for n in g[field] if n.get("id")]
-                assert len(ids) == len(set(ids))                 # no duplicate nodes
-                assert "abate" not in ids                         # no self node
-                for n in g[field]:
-                    assert "headword" in n and "id" in n          # graceful unresolved
-            return True
-        return inner()
-    assert _run_with_db(body)
+    async def body(repo, db):
+        w = await db.words.find_one({"id": "abate"}, {"_id": 0})
+        g = await build_word_graph(repo, w)
+        for field in ("synonyms", "antonyms", "related", "confusing_words"):
+            assert field in g
+            ids = [n["id"] for n in g[field] if n.get("id")]
+            assert len(ids) == len(set(ids))                 # no duplicate nodes
+            assert "abate" not in ids                         # no self node
+            for n in g[field]:
+                assert "headword" in n and "id" in n          # graceful unresolved
+        return True
+    assert _run_with_repo(body)
 
 
 def test_relationship_metrics_shape():
-    def body(db):
-        async def inner():
-            m = await relationship_quality_metrics(db)
-            assert m["self_references"] == 0
-            assert set(m["relationships_by_type"]) == {"synonyms", "antonyms", "related", "confusing_words"}
-            assert m["resolved_refs"] + m["unresolved_refs"] == m["total_relationships"]
-            return True
-        return inner()
-    assert _run_with_db(body)
+    async def body(repo, db):
+        m = await relationship_quality_metrics(repo)
+        assert m["self_references"] == 0
+        assert set(m["relationships_by_type"]) == {"synonyms", "antonyms", "related", "confusing_words"}
+        assert m["resolved_refs"] + m["unresolved_refs"] == m["total_relationships"]
+        return True
+    assert _run_with_repo(body)
 
 
 # ------------------------- E. API regression -------------------------

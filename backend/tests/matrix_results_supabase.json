@@ -1,0 +1,308 @@
+{
+  "backend": "supabase",
+  "passed": 50,
+  "failed": 0,
+  "blocked": 0,
+  "results": [
+    {
+      "num": 1,
+      "name": "login",
+      "status": "PASS",
+      "note": "login OK"
+    },
+    {
+      "num": 2,
+      "name": "authenticated session",
+      "status": "PASS",
+      "note": "me OK"
+    },
+    {
+      "num": 3,
+      "name": "session retrieval",
+      "status": "PASS",
+      "note": "session retrieval OK"
+    },
+    {
+      "num": 4,
+      "name": "logout/session deletion",
+      "status": "PASS",
+      "note": "logout invalidates session"
+    },
+    {
+      "num": 5,
+      "name": "session expiry behavior",
+      "status": "PASS",
+      "note": "expired/invalid token rejected with 401"
+    },
+    {
+      "num": 6,
+      "name": "word list",
+      "status": "PASS",
+      "note": "word list OK total=231"
+    },
+    {
+      "num": 7,
+      "name": "search",
+      "status": "PASS",
+      "note": "search returned 1 hits for 'abate'"
+    },
+    {
+      "num": 8,
+      "name": "pagination",
+      "status": "PASS",
+      "note": "pagination non-overlapping, consistent total"
+    },
+    {
+      "num": 9,
+      "name": "topic filter",
+      "status": "PASS",
+      "note": "topic filter: 30 words"
+    },
+    {
+      "num": 10,
+      "name": "CEFR filter",
+      "status": "PASS",
+      "note": "CEFR filter correct"
+    },
+    {
+      "num": 11,
+      "name": "exam filter",
+      "status": "PASS",
+      "note": "exam filter: 221 ielts words"
+    },
+    {
+      "num": 12,
+      "name": "saved/progress enrichment",
+      "status": "PASS",
+      "note": "saved/progress enrichment present"
+    },
+    {
+      "num": 13,
+      "name": "word detail",
+      "status": "PASS",
+      "note": "word detail shape OK"
+    },
+    {
+      "num": 14,
+      "name": "synonyms",
+      "status": "PASS",
+      "note": "synonyms: ['diminish', 'lessen', 'subside']"
+    },
+    {
+      "num": 15,
+      "name": "antonyms/related",
+      "status": "PASS",
+      "note": "antonyms resolved: ['intensify', 'increase']"
+    },
+    {
+      "num": 16,
+      "name": "confusing-word relation lookup",
+      "status": "PASS",
+      "note": "confusing_words list shape OK (may be empty for abate)"
+    },
+    {
+      "num": 17,
+      "name": "multiple choice",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 18,
+      "name": "synonym select",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 19,
+      "name": "true/false",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 20,
+      "name": "spelling",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 21,
+      "name": "fill blank",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 22,
+      "name": "definition recall",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 23,
+      "name": "context/sentence",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 24,
+      "name": "mixed adaptive",
+      "status": "PASS",
+      "note": "question shape OK (used mode=multiple_choice)"
+    },
+    {
+      "num": 25,
+      "name": "practice progress persistence",
+      "status": "PASS",
+      "note": "progress persisted status=SEEN"
+    },
+    {
+      "num": 26,
+      "name": "mastery/confidence persistence",
+      "status": "PASS",
+      "note": "mastery/confidence shape OK xp=10"
+    },
+    {
+      "num": 27,
+      "name": "XP atomic increment",
+      "status": "PASS",
+      "note": "XP atomic increment: 10 -> 20"
+    },
+    {
+      "num": 28,
+      "name": "analytics event",
+      "status": "PASS",
+      "note": "analytics event logged (via practice answer)"
+    },
+    {
+      "num": 29,
+      "name": "article retrieval",
+      "status": "PASS",
+      "note": "article listing: 4 articles"
+    },
+    {
+      "num": 30,
+      "name": "content persistence",
+      "status": "PASS",
+      "note": "article detail has body: article_id=morning-routines"
+    },
+    {
+      "num": 31,
+      "name": "word ingestion",
+      "status": "PASS",
+      "note": "word ingestion endpoint alive status=404"
+    },
+    {
+      "num": 32,
+      "name": "canonical deduplication",
+      "status": "PASS",
+      "note": "canonical deduplication: Abate -> abate (exists)"
+    },
+    {
+      "num": 33,
+      "name": "provenance/lifecycle",
+      "status": "PASS",
+      "note": "provenance=CURATED"
+    },
+    {
+      "num": 34,
+      "name": "validation/relation normalization",
+      "status": "PASS",
+      "note": "validation/relation normalization endpoint OK"
+    },
+    {
+      "num": 35,
+      "name": "graph relation resolution",
+      "status": "PASS",
+      "note": "graph relation resolution: ['increase']"
+    },
+    {
+      "num": 36,
+      "name": "unresolved relation handling",
+      "status": "PASS",
+      "note": "unresolved relations surfaced as {headword, id: null}"
+    },
+    {
+      "num": 37,
+      "name": "no duplicate/self relations",
+      "status": "PASS",
+      "note": "no duplicates, no self-references in graph"
+    },
+    {
+      "num": 38,
+      "name": "AI coach content",
+      "status": "PASS",
+      "note": "AI coach content for correlation cached=True"
+    },
+    {
+      "num": 39,
+      "name": "AI usage tracking",
+      "status": "PASS",
+      "note": "AI usage tracking: second call cached for correlation"
+    },
+    {
+      "num": 40,
+      "name": "AI usage/entitlement behavior",
+      "status": "PASS",
+      "note": "AI usage/entitlement: limit=3"
+    },
+    {
+      "num": 41,
+      "name": "TTS cache write/read",
+      "status": "PASS",
+      "note": "TTS cache write+read consistent key=/tts/f8e2e038d506482b42f687af8"
+    },
+    {
+      "num": 42,
+      "name": "binary audio roundtrip",
+      "status": "PASS",
+      "note": "BYTEA roundtrip: 1024 bytes \u2192 1024 bytes"
+    },
+    {
+      "num": 43,
+      "name": "subscription retrieval",
+      "status": "PASS",
+      "note": "subscription retrieval tier=free"
+    },
+    {
+      "num": 44,
+      "name": "entitlement state",
+      "status": "PASS",
+      "note": "entitlement state free->pro->free"
+    },
+    {
+      "num": 45,
+      "name": "access restriction behavior",
+      "status": "PASS",
+      "note": "locked exam returns 402"
+    },
+    {
+      "num": 46,
+      "name": "daily mission",
+      "status": "PASS",
+      "note": "daily mission shape OK new=8 review=0"
+    },
+    {
+      "num": 47,
+      "name": "saved-word learning flow",
+      "status": "PASS",
+      "note": "saved-word learning flow: 1 questions"
+    },
+    {
+      "num": 48,
+      "name": "review/progress flow",
+      "status": "PASS",
+      "note": "review/progress flow: slipping count=2"
+    },
+    {
+      "num": 49,
+      "name": "backend selector/startup isolation",
+      "status": "PASS",
+      "note": "backend selector active: DB_BACKEND=supabase"
+    },
+    {
+      "num": 50,
+      "name": "database failure/error propagation",
+      "status": "PASS",
+      "note": "DB failure/absence propagates as proper HTTP errors"
+    }
+  ]
+}

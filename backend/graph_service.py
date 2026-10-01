@@ -1,9 +1,8 @@
 """Canonical knowledge-graph service (Phase C).
 
 Reusable relationship normalization, integrity checking, and one-hop graph
-construction on top of the Phase A canonical schema. Pure logic is DB-free and
-portable to a future PostgreSQL layer; the ``async`` helpers add the minimal
-Mongo coupling needed for resolution/migration.
+construction on top of the Phase A canonical schema.  Pure logic is DB-free and
+portable; the ``async`` helpers accept a DatabaseRepository (mongo or supabase).
 
 Relationship canonical form (Phase A):
     {"ref": "<canonical word id | null>", "headword": "<display headword>"}
@@ -22,7 +21,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from vocab_schema import normalize_headword, WORD_RELATION_FIELDS, MORPH_FIELDS
 
-RELATION_NODE_PROJECTION = {"_id": 0, "id": 1, "headword": 1, "cefr": 1, "simple_definition": 1}
 LARGE_RELATION_THRESHOLD = 15
 
 
@@ -167,10 +165,12 @@ def check_relationship_integrity(doc: Dict[str, Any], id_by_key: Dict[str, str],
 
 
 # --------------------------------------------------------------------------- #
-# DB helpers (minimal coupling)
+# Repository-backed async helpers
 # --------------------------------------------------------------------------- #
-async def load_id_by_key(db) -> Dict[str, str]:
-    words = await db.words.find({}, {"_id": 0, "id": 1, "headword": 1}).to_list(200000)
+
+async def load_id_by_key(repo) -> Dict[str, str]:
+    """Build headword-key → word-id map from the database."""
+    words = await repo.load_all_words_minimal()
     id_by_key: Dict[str, str] = {}
     for w in words:
         k = normalize_headword(w.get("headword", ""))
@@ -179,17 +179,51 @@ async def load_id_by_key(db) -> Dict[str, str]:
     return id_by_key
 
 
-async def build_word_graph(db, word: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+async def build_word_graph(repo, word: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     """Bounded one-hop canonical graph for a word.
 
+    Uses a single batch query instead of N individual DB lookups to avoid N+1
+    performance problems, especially against Supabase HTTP.
+
     Deterministic order (input order), no duplicate nodes, no self-node,
-    unresolved refs surfaced as ``{headword, id: null}``. No multi-hop traversal.
+    unresolved refs surfaced as ``{headword, id: null}``.
     """
     self_id = word.get("id")
     self_key = normalize_headword(word.get("headword"))
-    graph: Dict[str, List[Dict[str, Any]]] = {}
     rels = word.get("relations") if isinstance(word.get("relations"), dict) else {}
 
+    # ── pass 1: collect all identifiers we'll need ──────────────────────────
+    ref_ids: List[str] = []
+    hw_keys: List[str] = []
+    headwords_lower: List[str] = []
+
+    for field in WORD_RELATION_FIELDS:
+        entries = rels.get(field)
+        if entries is None:
+            entries = [{"ref": None, "headword": h} for h in (word.get(field, []) or [])]
+        for entry in entries:
+            hw, ref = _entry_parts(entry)
+            if not hw or not str(hw).strip():
+                continue
+            hw_str = str(hw).strip()
+            hw_key = normalize_headword(hw_str)
+            if not hw_key or hw_key == self_key:
+                continue
+            if ref and ref not in ref_ids:
+                ref_ids.append(ref)
+            if hw_key not in hw_keys:
+                hw_keys.append(hw_key)
+            hw_lower = hw_str.lower()
+            if hw_lower not in headwords_lower:
+                headwords_lower.append(hw_lower)
+
+    # ── pass 2: single batch fetch ───────────────────────────────────────────
+    word_cache: Dict[str, Dict[str, Any]] = {}
+    if ref_ids or hw_keys or headwords_lower:
+        word_cache = await repo.load_words_for_graph_batch(ref_ids, hw_keys, headwords_lower)
+
+    # ── pass 3: build graph using cached results ─────────────────────────────
+    graph: Dict[str, List[Dict[str, Any]]] = {}
     for field in WORD_RELATION_FIELDS:
         entries = rels.get(field)
         if entries is None:
@@ -202,17 +236,21 @@ async def build_word_graph(db, word: Dict[str, Any]) -> Dict[str, List[Dict[str,
                 continue
             hw = str(hw).strip()
             hw_key = normalize_headword(hw)
-            if hw_key == self_key:  # never a self-node
+            if not hw_key or hw_key == self_key:
                 continue
-            match = None
+
+            match: Optional[Dict[str, Any]] = None
             if ref:
-                match = await db.words.find_one({"id": ref, "status": "PUBLISHED"}, RELATION_NODE_PROJECTION)
+                match = word_cache.get(f"ref:{ref}")
             if not match:
-                match = await db.words.find_one(
-                    {"status": "PUBLISHED", "$or": [{"canonical_key": hw_key}, {"headword": hw.lower()}]},
-                    RELATION_NODE_PROJECTION)
+                match = (word_cache.get(f"hw_key:{hw_key}") or
+                         word_cache.get(f"hw:{hw.lower()}"))
+
             node = match if match else {"headword": hw, "id": None}
-            if node.get("id") == self_id and self_id:  # defensive: skip self
+            # strip _id if present (Mongo legacy)
+            node = {k: v for k, v in node.items() if k != "_id"}
+
+            if node.get("id") == self_id and self_id:
                 continue
             dedupe_key = node["id"] if node.get("id") else f"hw:{hw_key}"
             if dedupe_key in seen:
@@ -220,19 +258,20 @@ async def build_word_graph(db, word: Dict[str, Any]) -> Dict[str, List[Dict[str,
             seen.add(dedupe_key)
             nodes.append(node)
         graph[field] = nodes
+
     return graph
 
 
-async def resolve_all_relationship_refs(db) -> Dict[str, int]:
+async def resolve_all_relationship_refs(repo) -> Dict[str, int]:
     """Idempotent migration: normalize + resolve every word's relations.
 
     Only writes the ``relations`` field, and only when it actually changes.
     Never touches word IDs, definitions, progress, saved words, etc. Safe to
     run repeatedly (a second run reports 0 updated).
     """
-    id_by_key = await load_id_by_key(db)
+    id_by_key = await load_id_by_key(repo)
     known_ids = set(id_by_key.values())
-    words = await db.words.find({}, {"_id": 0}).to_list(200000)
+    words = await repo.load_all_words_full()
     stats = {"scanned": 0, "updated": 0, "self_removed": 0,
              "duplicates_removed": 0, "resolved": 0, "unresolved": 0}
     for w in words:
@@ -241,26 +280,28 @@ async def resolve_all_relationship_refs(db) -> Dict[str, int]:
         stats["self_removed"] += s["self_removed"]
         stats["duplicates_removed"] += s["duplicates_removed"]
         if w.get("relations") != normalized:
-            await db.words.update_one({"id": w["id"]}, {"$set": {"relations": normalized}})
+            await repo.update_word(w["id"], {"relations": normalized})
             stats["updated"] += 1
-    # recompute resolved/unresolved after write for an accurate snapshot
-    for w in await db.words.find({}, {"_id": 0, "relations": 1}).to_list(200000):
+
+    # recompute resolved/unresolved for an accurate snapshot
+    words_after = await repo.load_all_words_full()
+    for w in words_after:
         for field in WORD_RELATION_FIELDS:
             for e in (w.get("relations", {}) or {}).get(field, []) or []:
                 stats["resolved" if e.get("ref") else "unresolved"] += 1
     return stats
 
 
-async def refresh_refs_for_new_key(db, canonical_key: str, word_id: str) -> int:
+async def refresh_refs_for_new_key(repo, canonical_key: str, word_id: str) -> int:
     """Targeted re-resolution after a new word is ingested.
 
     Finds words whose relations reference ``canonical_key`` with a null ref and
-    fills in ``word_id``. Bounded query — no full scan on normal requests.
+    fills in ``word_id``. Uses the find_words_with_relation_headword repository
+    method (RPC for Supabase, $elemMatch for Mongo).
     """
     if not canonical_key or not word_id:
         return 0
-    or_clauses = [{f"relations.{f}.headword": canonical_key} for f in WORD_RELATION_FIELDS]
-    candidates = await db.words.find({"$or": or_clauses}, {"_id": 0}).to_list(5000)
+    candidates = await repo.find_words_with_relation_headword(canonical_key)
     updated = 0
     for w in candidates:
         if w.get("id") == word_id:
@@ -273,16 +314,16 @@ async def refresh_refs_for_new_key(db, canonical_key: str, word_id: str) -> int:
                     e["ref"] = word_id
                     changed = True
         if changed:
-            await db.words.update_one({"id": w["id"]}, {"$set": {"relations": rels}})
+            await repo.update_word(w["id"], {"relations": rels})
             updated += 1
     return updated
 
 
-async def relationship_quality_metrics(db) -> Dict[str, Any]:
+async def relationship_quality_metrics(repo) -> Dict[str, Any]:
     """Read-only relationship metrics for the content quality report."""
-    id_by_key = await load_id_by_key(db)
+    id_by_key = await load_id_by_key(repo)
     known_ids = set(id_by_key.values())
-    words = await db.words.find({}, {"_id": 0}).to_list(200000)
+    words = await repo.load_all_words_full()
 
     by_type = {f: 0 for f in WORD_RELATION_FIELDS}
     total = resolved = unresolved = self_refs = duplicates = malformed = 0

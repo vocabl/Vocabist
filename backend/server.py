@@ -1,9 +1,12 @@
-"""Vocabist backend — FastAPI + MongoDB (Motor).
+"""Vocabist backend — FastAPI + Repository pattern (MongoDB/Supabase).
 
 Implements Phase 1–3: auth (email/password + Emergent Google), profile /
 onboarding, vocabulary engine, word detail + knowledge graph, saved words,
 daily mission, adaptive spaced-review practice engine, progress / streak / XP,
 entitlements and analytics events.
+
+DB_BACKEND=mongo (default) → MongoRepository (Motor)
+DB_BACKEND=supabase        → SupabaseRepository (supabase-py AsyncClient)
 """
 import os
 import re
@@ -17,7 +20,6 @@ import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
-from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 
@@ -28,12 +30,11 @@ from vocab_schema import (
 )
 from content_ingest import ingest_word, migrate_content_lifecycle
 from graph_service import build_word_graph, resolve_all_relationship_refs
+from db import get_db
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ.get("DB_NAME", "vocably")
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 APP_URL = os.environ.get("APP_URL", "").rstrip("/")
@@ -48,8 +49,11 @@ ENTITLEMENTS = {
 def entitlements_for(tier: str) -> dict:
     return ENTITLEMENTS.get(tier or "free", ENTITLEMENTS["free"])
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+
+# Repository singleton — initialized at module load time (synchronous).
+# The concrete client (Motor / supabase-py) is created lazily on first use.
+repo = get_db()
+
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI(title="Vocabist API")
@@ -80,6 +84,11 @@ def make_token() -> str:
 def ensure_aware(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except ValueError:
+            return None
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
@@ -102,12 +111,12 @@ async def get_current_user(request: Request) -> dict:
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = auth[7:]
-    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    session = await repo.get_session(token)
     if not session:
         raise HTTPException(status_code=401, detail="Invalid session")
     if ensure_aware(session.get("expires_at")) < now_utc():
         raise HTTPException(status_code=401, detail="Session expired")
-    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    user = await repo.get_user_by_id(session["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
@@ -115,7 +124,7 @@ async def get_current_user(request: Request) -> dict:
 
 async def create_session(user_id: str) -> str:
     token = make_token()
-    await db.user_sessions.insert_one({
+    await repo.create_session({
         "session_token": token,
         "user_id": user_id,
         "created_at": now_utc(),
@@ -195,7 +204,7 @@ from practice_engine import generate_question
 
 
 async def all_words_cache() -> List[dict]:
-    return await db.words.find({"status": "PUBLISHED"}, {"_id": 0}).to_list(1000)
+    return await repo.find_published_words()
 
 # ---------------------------------------------------------------------------
 # auth routes
@@ -204,11 +213,11 @@ async def all_words_cache() -> List[dict]:
 
 @api.post("/auth/register")
 async def register(body: RegisterBody):
-    existing = await db.users.find_one({"email": body.email.lower()})
+    existing = await repo.get_user_by_email(body.email.lower())
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
     user_id = make_user_id()
-    await db.users.insert_one({
+    await repo.create_user({
         "user_id": user_id,
         "email": body.email.lower(),
         "name": body.name,
@@ -221,13 +230,13 @@ async def register(body: RegisterBody):
         "created_at": now_utc(),
     })
     token = await create_session(user_id)
-    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    user = await repo.get_user_by_id(user_id)
     return {"token": token, "user": public_user(user)}
 
 
 @api.post("/auth/login")
 async def login(body: LoginBody):
-    user = await db.users.find_one({"email": body.email.lower()})
+    user = await repo.get_user_by_email(body.email.lower())
     if not user or not user.get("password_hash") or not pwd_ctx.verify(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = await create_session(user["user_id"])
@@ -244,10 +253,10 @@ async def google_session(body: SessionBody):
     email = (data.get("email") or "").lower()
     if not email:
         raise HTTPException(status_code=401, detail="No email in session")
-    user = await db.users.find_one({"email": email})
+    user = await repo.get_user_by_email(email)
     if not user:
         user_id = make_user_id()
-        await db.users.insert_one({
+        await repo.create_user({
             "user_id": user_id,
             "email": email,
             "name": data.get("name"),
@@ -259,7 +268,7 @@ async def google_session(body: SessionBody):
             "streak": 0,
             "created_at": now_utc(),
         })
-        user = await db.users.find_one({"user_id": user_id})
+        user = await repo.get_user_by_id(user_id)
     token = await create_session(user["user_id"])
     return {"token": token, "user": public_user(user)}
 
@@ -273,7 +282,7 @@ async def me(user: dict = Depends(get_current_user)):
 async def logout(request: Request, user: dict = Depends(get_current_user)):
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        await db.user_sessions.delete_one({"session_token": auth[7:]})
+        await repo.delete_session(auth[7:])
     return {"ok": True}
 
 # ---------------------------------------------------------------------------
@@ -282,7 +291,7 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 
 async def get_or_create_profile(user_id: str) -> dict:
-    prof = await db.profiles.find_one({"user_id": user_id}, {"_id": 0})
+    prof = await repo.get_profile(user_id)
     if not prof:
         prof = {
             "user_id": user_id,
@@ -298,21 +307,20 @@ async def get_or_create_profile(user_id: str) -> dict:
             "last_active_date": None,
             "created_at": now_utc(),
         }
-        await db.profiles.insert_one(dict(prof))
+        await repo.create_profile(dict(prof))
     return prof
 
 
 @api.get("/profile")
 async def get_profile(user: dict = Depends(get_current_user)):
     prof = await get_or_create_profile(user["user_id"])
-    prof.pop("_id", None)
     return {"user": public_user(user), "profile": prof}
 
 
 @api.post("/onboarding")
 async def onboarding(body: OnboardingBody, user: dict = Depends(get_current_user)):
     await get_or_create_profile(user["user_id"])
-    await db.profiles.update_one({"user_id": user["user_id"]}, {"$set": {
+    await repo.update_profile(user["user_id"], {
         "reason": body.reason,
         "level": body.level,
         "daily_minutes": body.daily_minutes,
@@ -320,10 +328,10 @@ async def onboarding(body: OnboardingBody, user: dict = Depends(get_current_user
         "exam_date": body.exam_date,
         "target_score": body.target_score,
         "updated_at": now_utc(),
-    }})
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"onboarded": True}})
-    await log_event(user["user_id"], "onboarding_completed", {"reason": body.reason, "level": body.level})
-    prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    })
+    await repo.update_user(user["user_id"], {"onboarded": True})
+    await repo.log_event(user["user_id"], "onboarding_completed", {"reason": body.reason, "level": body.level})
+    prof = await repo.get_profile(user["user_id"])
     return {"profile": prof}
 
 
@@ -337,8 +345,8 @@ async def set_exam_goal(body: ExamGoalBody, user: dict = Depends(get_current_use
         update["target_score"] = body.target_score
     if body.daily_minutes is not None:
         update["daily_minutes"] = body.daily_minutes
-    await db.profiles.update_one({"user_id": user["user_id"]}, {"$set": update})
-    prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    await repo.update_profile(user["user_id"], update)
+    prof = await repo.get_profile(user["user_id"])
     return {"profile": prof}
 
 # ---------------------------------------------------------------------------
@@ -347,9 +355,7 @@ async def set_exam_goal(body: ExamGoalBody, user: dict = Depends(get_current_use
 
 
 def word_public(w: dict) -> dict:
-    w = dict(w)
-    w.pop("_id", None)
-    return w
+    return {k: v for k, v in w.items() if k != "_id"}
 
 
 @api.get("/words")
@@ -362,24 +368,11 @@ async def list_words(
     offset: int = 0,
     user: dict = Depends(get_current_user),
 ):
-    q: dict = {"status": "PUBLISHED"}
-    if search:
-        q["$or"] = [
-            {"headword": {"$regex": search, "$options": "i"}},
-            {"simple_definition": {"$regex": search, "$options": "i"}},
-        ]
-    if topic:
-        q["topic"] = topic
-    if cefr:
-        q["cefr"] = cefr
-    if exam:
-        q["exam_relevance"] = exam
-    total = await db.words.count_documents(q)
-    cursor = db.words.find(q, {"_id": 0}).sort("headword", 1).skip(offset).limit(limit)
-    words = await cursor.to_list(limit)
+    total, words = await repo.list_words(search, topic, cefr, exam, offset, limit)
     # attach saved + progress status
-    saved = {s["word_id"] for s in await db.saved_words.find({"user_id": user["user_id"]}, {"_id": 0, "word_id": 1}).to_list(1000)}
-    prog = {p["word_id"]: p.get("status", "NEW") for p in await db.user_word_progress.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(2000)}
+    saved = await repo.get_saved_word_ids(user["user_id"])
+    prog = {p["word_id"]: p.get("status", "NEW")
+            for p in await repo.get_all_progress(user["user_id"])}
     for w in words:
         w["saved"] = w["id"] in saved
         w["status"] = prog.get(w["id"], "NEW")
@@ -388,43 +381,39 @@ async def list_words(
 
 @api.get("/words/{word_id}")
 async def word_detail(word_id: str, user: dict = Depends(get_current_user)):
-    w = await db.words.find_one({"id": word_id}, {"_id": 0})
+    w = await repo.get_word(word_id)
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
 
-    graph = await build_word_graph(db, w)
-    exams = await db.exams.find({"slug": {"$in": w.get("exam_relevance", [])}}, {"_id": 0}).to_list(20)
-    saved = await db.saved_words.find_one({"user_id": user["user_id"], "word_id": word_id})
-    prog = await db.user_word_progress.find_one({"user_id": user["user_id"], "word_id": word_id}, {"_id": 0})
-    await log_event(user["user_id"], "word_viewed", {"word_id": word_id})
-    return {"word": w, "graph": graph, "exams": exams,
+    graph = await build_word_graph(repo, w)
+    exams = await repo.find_exams_by_slugs(w.get("exam_relevance") or [])
+    saved = await repo.find_saved_word(user["user_id"], word_id)
+    prog = await repo.get_word_progress(user["user_id"], word_id)
+    await repo.log_event(user["user_id"], "word_viewed", {"word_id": word_id})
+    return {"word": word_public(w), "graph": graph, "exams": exams,
             "saved": bool(saved), "progress": prog}
 
 
 @api.post("/words/{word_id}/save")
 async def save_word(word_id: str, user: dict = Depends(get_current_user)):
-    w = await db.words.find_one({"id": word_id})
+    w = await repo.get_word(word_id)
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
-    await db.saved_words.update_one(
-        {"user_id": user["user_id"], "word_id": word_id},
-        {"$set": {"user_id": user["user_id"], "word_id": word_id, "created_at": now_utc()}},
-        upsert=True,
-    )
-    await log_event(user["user_id"], "word_saved", {"word_id": word_id})
+    await repo.save_word(user["user_id"], word_id)
+    await repo.log_event(user["user_id"], "word_saved", {"word_id": word_id})
     return {"saved": True}
 
 
 @api.delete("/words/{word_id}/save")
 async def unsave_word(word_id: str, user: dict = Depends(get_current_user)):
-    await db.saved_words.delete_one({"user_id": user["user_id"], "word_id": word_id})
+    await repo.unsave_word(user["user_id"], word_id)
     return {"saved": False}
 
 
 @api.get("/saved")
 async def saved_words(user: dict = Depends(get_current_user)):
-    ids = [s["word_id"] for s in await db.saved_words.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)]
-    words = await db.words.find({"id": {"$in": ids}}, {"_id": 0}).to_list(500)
+    ids = await repo.get_saved_words_sorted(user["user_id"])
+    words = await repo.find_words_by_ids(ids)
     order = {wid: i for i, wid in enumerate(ids)}
     words.sort(key=lambda w: order.get(w["id"], 999))
     for w in words:
@@ -438,18 +427,18 @@ async def saved_words(user: dict = Depends(get_current_user)):
 
 @api.get("/topics")
 async def get_topics(user: dict = Depends(get_current_user)):
-    topics = await db.topics.find({}, {"_id": 0}).to_list(100)
+    topics = await repo.get_topics()
     for t in topics:
-        t["word_count"] = await db.words.count_documents({"topic": t["slug"], "status": "PUBLISHED"})
+        t["word_count"] = await repo.count_words_by_topic(t["slug"])
     return {"topics": topics}
 
 
 @api.get("/exams")
 async def get_exams(user: dict = Depends(get_current_user)):
-    exams = await db.exams.find({}, {"_id": 0}).to_list(100)
+    exams = await repo.get_exams()
     prof = await get_or_create_profile(user["user_id"])
     for e in exams:
-        e["word_count"] = await db.words.count_documents({"exam_relevance": e["slug"], "status": "PUBLISHED"})
+        e["word_count"] = await repo.count_words_by_exam(e["slug"])
         e["active"] = prof.get("exam_slug") == e["slug"]
     return {"exams": exams, "active_exam": prof.get("exam_slug"), "exam_date": prof.get("exam_date"),
             "target_score": prof.get("target_score")}
@@ -457,11 +446,11 @@ async def get_exams(user: dict = Depends(get_current_user)):
 
 @api.get("/exams/{slug}")
 async def exam_detail(slug: str, user: dict = Depends(get_current_user)):
-    exam = await db.exams.find_one({"slug": slug}, {"_id": 0})
+    exam = await repo.get_exam_by_slug(slug)
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
-    words = await db.words.find({"exam_relevance": slug, "status": "PUBLISHED"}, {"_id": 0}).to_list(500)
-    prog = {p["word_id"]: p for p in await db.user_word_progress.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(2000)}
+    words = await repo.find_published_words_by_exam(slug)
+    prog = {p["word_id"]: p for p in await repo.get_all_progress(user["user_id"])}
     mastered = sum(1 for w in words if prog.get(w["id"], {}).get("status") == "MASTERED")
     learning = sum(1 for w in words if prog.get(w["id"], {}).get("status") in ("LEARNING", "RECALLING", "SEEN"))
     prof = await get_or_create_profile(user["user_id"])
@@ -497,14 +486,13 @@ async def select_mission_words(user: dict) -> dict:
     target = max(5, round(prof.get("daily_minutes", 10) * 1.2))
     now = now_utc()
 
-    progresses = await db.user_word_progress.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(3000)
+    progresses = await repo.get_all_progress(user["user_id"])
     seen_ids = {p["word_id"] for p in progresses}
 
     # due for review — ranked by the adaptive priority engine
     due = [p for p in progresses if ensure_aware(p.get("next_review_at")) and ensure_aware(p["next_review_at"]) <= now and p.get("status") != "MASTERED"]
     active_exam = prof.get("exam_slug")
-    due_meta = {w["id"]: w for w in await db.words.find(
-        {"id": {"$in": [p["word_id"] for p in due]}}, {"_id": 0}).to_list(3000)} if due else {}
+    due_meta = {w["id"]: w for w in await repo.find_words_by_ids([p["word_id"] for p in due])} if due else {}
     for p in due:
         pr = select_learning_priority(p, due_meta.get(p["word_id"], {}), now, active_exam)
         p["_priority"] = pr["priority"]
@@ -512,13 +500,7 @@ async def select_mission_words(user: dict) -> dict:
     due_ids = [p["word_id"] for p in due][:target]
 
     # new words filtered by exam/level
-    q: dict = {"status": "PUBLISHED", "id": {"$nin": list(seen_ids)}}
-    if prof.get("exam_slug"):
-        q["exam_relevance"] = prof["exam_slug"]
-    candidates = await db.words.find(q, {"_id": 0}).to_list(500)
-    if not candidates and prof.get("exam_slug"):
-        q.pop("exam_relevance", None)
-        candidates = await db.words.find(q, {"_id": 0}).to_list(500)
+    candidates = await repo.find_words_for_mission(seen_ids, prof.get("exam_slug"))
     candidates.sort(key=lambda w: (-w.get("academic_importance", 0), -w.get("frequency", 0)))
     remaining = max(0, target - len(due_ids))
     new_ids = [w["id"] for w in candidates][:max(remaining, min(5, len(candidates)))]
@@ -536,12 +518,18 @@ async def mission(user: dict = Depends(get_current_user)):
     prof = await get_or_create_profile(user["user_id"])
     total = sel["review_count"] + sel["new_count"]
     # continue card = most recent LEARNING/RECALLING word
-    recent = await db.user_word_progress.find(
-        {"user_id": user["user_id"], "status": {"$in": ["LEARNING", "RECALLING"]}}, {"_id": 0}
-    ).sort("last_reviewed_at", -1).to_list(1)
+    recent = await repo.get_progress_by_statuses(
+        user["user_id"], ["LEARNING", "RECALLING"]
+    )
+    # Sort by last_reviewed_at descending
+    recent_sorted = sorted(
+        [p for p in recent if p.get("last_reviewed_at")],
+        key=lambda p: ensure_aware(p["last_reviewed_at"]) or now_utc(),
+        reverse=True,
+    )
     continue_word = None
-    if recent:
-        cw = await db.words.find_one({"id": recent[0]["word_id"]}, {"_id": 0})
+    if recent_sorted:
+        cw = await repo.get_word(recent_sorted[0]["word_id"])
         if cw:
             continue_word = {"id": cw["id"], "headword": cw["headword"],
                              "simple_definition": cw["simple_definition"], "cefr": cw.get("cefr")}
@@ -573,25 +561,23 @@ async def practice_start(
     elif source == "exam" and ref:
         if ref in entitlements_for(user.get("tier"))["locked_exams"]:
             raise HTTPException(status_code=402, detail="Upgrade to Pro to practice this exam")
-        ws = await db.words.find({"exam_relevance": ref, "status": "PUBLISHED"}, {"_id": 0, "id": 1}).to_list(100)
-        word_ids = [w["id"] for w in ws][:15]
+        word_ids = (await repo.find_published_words_by_exam_ids(ref))[:15]
     elif source == "topic" and ref:
-        ws = await db.words.find({"topic": ref, "status": "PUBLISHED"}, {"_id": 0, "id": 1}).to_list(100)
-        word_ids = [w["id"] for w in ws][:15]
+        word_ids = (await repo.find_published_words_by_topic_ids(ref))[:15]
     elif source == "word" and ref:
         word_ids = [ref]
     elif source == "list" and ref:
         tokens = [x for x in ref.split(",") if x][:15]
         word_ids = []
         for tk in tokens:
-            wid = tk if await db.words.find_one({"id": tk}, {"_id": 1}) else await ensure_word(tk)
+            wid = tk if await repo.word_exists(tk) else await ensure_word(tk)
             if wid:
                 word_ids.append(wid)
     elif source == "slipping":
         word_ids = await slipping_word_ids(user["user_id"])
     elif source == "saved":
-        ws = await db.saved_words.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(100)
-        word_ids = [w["word_id"] for w in ws][:15]
+        saved_list = await repo.get_saved_words_sorted(user["user_id"])
+        word_ids = saved_list[:15]
     else:
         sel = await select_mission_words(user)
         word_ids = sel["due_ids"] + sel["new_ids"]
@@ -599,8 +585,9 @@ async def practice_start(
     if not word_ids:
         return {"questions": [], "count": 0}
 
-    progresses = {p["word_id"]: p for p in await db.user_word_progress.find(
-        {"user_id": user["user_id"], "word_id": {"$in": word_ids}}, {"_id": 0}).to_list(1000)}
+    progresses = {p["word_id"]: p for p in await repo.find_progress_by_words(
+        user["user_id"], word_ids
+    )}
 
     questions = []
     session_modes: List[str] = []
@@ -610,7 +597,7 @@ async def practice_start(
             continue
         q = generate_question(w, pool, progresses.get(wid), requested_mode=mode, session_modes=session_modes)
         if not q:
-            continue  # graceful skip: no valid question could be built for this word
+            continue  # graceful skip
         session_modes.append(q["mode"])
         q["teach"] = progresses.get(wid, {}).get("status", "NEW") in ("NEW",) and source in ("mission", "exam", "topic")
         q["card"] = {
@@ -622,31 +609,27 @@ async def practice_start(
         }
         questions.append(q)
 
-    await log_event(user["user_id"], "learning_session_started", {"source": source, "count": len(questions)})
+    await repo.log_event(user["user_id"], "learning_session_started", {"source": source, "count": len(questions)})
     return {"questions": questions, "count": len(questions), "source": source}
 
 
 @api.post("/practice/answer")
 async def practice_answer(body: AnswerBody, user: dict = Depends(get_current_user)):
-    prev = await db.user_word_progress.find_one({"user_id": user["user_id"], "word_id": body.word_id}, {"_id": 0})
-    word_meta = await db.words.find_one({"id": body.word_id}, {"_id": 0}) or {}
+    prev = await repo.get_word_progress(user["user_id"], body.word_id)
+    word_meta = await repo.get_word(body.word_id) or {}
     updated = adaptive_update_progress(prev, body.correct, body.response_time_ms, word_meta, now_utc())
     updated_full = {"user_id": user["user_id"], "word_id": body.word_id, **updated}
     if not prev:
         updated_full["created_at"] = now_utc()
     was_mastered = prev and prev.get("status") == "MASTERED"
-    await db.user_word_progress.update_one(
-        {"user_id": user["user_id"], "word_id": body.word_id},
-        {"$set": updated_full}, upsert=True,
-    )
+    await repo.upsert_word_progress(user["user_id"], body.word_id, updated_full)
     xp_gain = 10 if body.correct else 2
-    await db.profiles.update_one({"user_id": user["user_id"]}, {"$inc": {"xp": xp_gain}})
-    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"xp": xp_gain}})
+    await repo.increment_user_xp(user["user_id"], xp_gain)
 
     just_mastered = updated["status"] == "MASTERED" and not was_mastered
     if just_mastered:
-        await log_event(user["user_id"], "word_mastered", {"word_id": body.word_id})
-    await log_event(user["user_id"], "answer_submitted", {"word_id": body.word_id, "correct": body.correct, "mode": body.mode})
+        await repo.log_event(user["user_id"], "word_mastered", {"word_id": body.word_id})
+    await repo.log_event(user["user_id"], "answer_submitted", {"word_id": body.word_id, "correct": body.correct, "mode": body.mode})
 
     return {"status": updated["status"], "mastery_score": updated["mastery_score"],
             "confidence_score": updated["confidence_score"], "difficulty": updated["difficulty"],
@@ -660,20 +643,22 @@ async def practice_complete(body: SessionCompleteBody, user: dict = Depends(get_
     prof = await get_or_create_profile(user["user_id"])
     today = date.today().isoformat()
     last = prof.get("last_active_date")
+    # last_active_date might come back as a date object or string
+    if hasattr(last, "isoformat"):
+        last = last.isoformat()
     streak = prof.get("streak", 0)
     if last != today:
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         streak = streak + 1 if last == yesterday else 1
     longest = max(prof.get("longest_streak", 0), streak)
-    await db.profiles.update_one({"user_id": user["user_id"]}, {"$set": {
-        "streak": streak, "longest_streak": longest, "last_active_date": today,
-    }})
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"streak": streak}})
-    await db.study_sessions.insert_one({
+    session_doc = {
         "user_id": user["user_id"], "answered": body.answered, "correct": body.correct,
         "duration_ms": body.duration_ms, "source": body.source, "created_at": now_utc(),
-    })
-    await log_event(user["user_id"], "learning_session_completed",
+    }
+    await repo.complete_practice_session(
+        user["user_id"], streak, longest, today, session_doc
+    )
+    await repo.log_event(user["user_id"], "learning_session_completed",
                     {"answered": body.answered, "correct": body.correct, "source": body.source})
     return {"streak": streak, "longest_streak": longest}
 
@@ -687,7 +672,7 @@ XP_PER_LEVEL = 500
 @api.get("/progress")
 async def progress(user: dict = Depends(get_current_user)):
     prof = await get_or_create_profile(user["user_id"])
-    progresses = await db.user_word_progress.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(5000)
+    progresses = await repo.get_all_progress(user["user_id"])
     learned = sum(1 for p in progresses if p.get("status") in ("LEARNING", "RECALLING", "MASTERED"))
     mastered = sum(1 for p in progresses if p.get("status") == "MASTERED")
     total_correct = sum(p.get("times_correct", 0) for p in progresses)
@@ -695,20 +680,21 @@ async def progress(user: dict = Depends(get_current_user)):
     accuracy = round(100 * total_correct / total_answered) if total_answered else 0
 
     # weak areas: topics with lowest avg mastery
-    words = {w["id"]: w for w in await db.words.find({}, {"_id": 0, "id": 1, "topic": 1}).to_list(2000)}
+    words = await repo.load_all_words_minimal()
+    word_topics = {w["id"]: w.get("topic") for w in words}
     topic_scores: dict = {}
     for p in progresses:
-        w = words.get(p["word_id"])
-        if not w:
+        t = word_topics.get(p["word_id"])
+        if not t:
             continue
-        topic_scores.setdefault(w["topic"], []).append(p.get("mastery_score", 0))
+        topic_scores.setdefault(t, []).append(float(p.get("mastery_score", 0)))
     weak = sorted(
         [{"topic": t, "avg_mastery": round(sum(v) / len(v))} for t, v in topic_scores.items() if v],
         key=lambda x: x["avg_mastery"])[:3]
 
     xp = prof.get("xp", 0)
     level = xp // XP_PER_LEVEL + 1
-    sessions = await db.study_sessions.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
+    sessions = await repo.get_study_sessions(user["user_id"])
     study_minutes = round(sum(s.get("duration_ms", 0) for s in sessions) / 60000)
 
     return {
@@ -748,18 +734,9 @@ def compute_achievements(learned: int, mastered: int, streak: int) -> List[dict]
 # ---------------------------------------------------------------------------
 
 
-async def log_event(user_id: str, event: str, props: dict):
-    try:
-        await db.analytics_events.insert_one({
-            "user_id": user_id, "event": event, "props": props, "created_at": now_utc(),
-        })
-    except Exception:
-        pass
-
-
 @api.post("/analytics")
 async def analytics(body: AnalyticsBody, user: dict = Depends(get_current_user)):
-    await log_event(user["user_id"], body.event, body.props)
+    await repo.log_event(user["user_id"], body.event, body.props)
     return {"ok": True}
 
 
@@ -772,11 +749,6 @@ class SubscribeBody(BaseModel):
     plan: str = "monthly"
 
 
-async def ai_coach_used_today(user_id: str) -> int:
-    today = date.today().isoformat()
-    return await db.ai_coach_usage.count_documents({"user_id": user_id, "date": today})
-
-
 @api.get("/entitlements")
 async def get_entitlements(user: dict = Depends(get_current_user)):
     tier = user.get("tier", "free")
@@ -785,28 +757,21 @@ async def get_entitlements(user: dict = Depends(get_current_user)):
         "tier": tier,
         "is_pro": tier == "pro",
         "limits": ent,
-        "ai_coach_used_today": await ai_coach_used_today(user["user_id"]),
+        "ai_coach_used_today": await repo.count_ai_coach_today(user["user_id"]),
     }
 
 
 @api.post("/subscription/activate")
 async def activate_subscription(body: SubscribeBody, user: dict = Depends(get_current_user)):
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"tier": "pro"}})
-    await db.subscriptions.update_one(
-        {"user_id": user["user_id"]},
-        {"$set": {"user_id": user["user_id"], "plan": body.plan, "status": "active",
-                  "platform": "mock", "started_at": now_utc()}},
-        upsert=True,
-    )
-    await log_event(user["user_id"], "subscription_started", {"plan": body.plan})
+    await repo.activate_subscription(user["user_id"], body.plan, now_utc())
+    await repo.log_event(user["user_id"], "subscription_started", {"plan": body.plan})
     return {"tier": "pro"}
 
 
 @api.post("/subscription/cancel")
 async def cancel_subscription(user: dict = Depends(get_current_user)):
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"tier": "free"}})
-    await db.subscriptions.update_one({"user_id": user["user_id"]}, {"$set": {"status": "cancelled"}})
-    await log_event(user["user_id"], "subscription_cancelled", {})
+    await repo.cancel_subscription(user["user_id"])
+    await repo.log_event(user["user_id"], "subscription_cancelled", {})
     return {"tier": "free"}
 
 
@@ -825,26 +790,25 @@ async def make_tts(text: str) -> str:
     """Generate (or reuse) a cached mp3 for text; return its /api/tts key."""
     from emergentintegrations.llm.openai import OpenAITextToSpeech
     key = hashlib.sha256(f"{text}|alloy|1.0|tts-1|mp3".encode()).hexdigest()
-    existing = await db.tts_cache.find_one({"key": key}, {"_id": 1})
-    if not existing:
+    if not await repo.tts_cache_exists(key):
         tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
         audio = await tts.generate_speech(text=clean_for_tts(text), model="tts-1", voice="alloy")
-        await db.tts_cache.insert_one({"key": key, "audio": audio, "created_at": now_utc()})
+        await repo.insert_tts_cache(key, audio)
     return key
 
 
 @api.get("/tts/{key}.mp3")
 async def serve_tts(key: str):
-    doc = await db.tts_cache.find_one({"key": key})
-    if not doc:
+    audio = await repo.get_tts_audio(key)
+    if audio is None:
         raise HTTPException(status_code=404, detail="Not found")
-    return Response(content=bytes(doc["audio"]), media_type="audio/mpeg",
+    return Response(content=audio, media_type="audio/mpeg",
                     headers={"Cache-Control": "public, max-age=31536000"})
 
 
 @api.get("/words/{word_id}/audio")
 async def word_audio(word_id: str, user: dict = Depends(get_current_user)):
-    w = await db.words.find_one({"id": word_id}, {"_id": 0})
+    w = await repo.get_word(word_id)
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
     if w.get("audio"):
@@ -876,7 +840,7 @@ async def word_audio(word_id: str, user: dict = Depends(get_current_user)):
             tts_url = None
 
     audio = {"us_url": us_url, "uk_url": uk_url, "tts_url": tts_url}
-    await db.words.update_one({"id": word_id}, {"$set": {"audio": audio}})
+    await repo.update_word(word_id, {"audio": audio})
     return audio
 
 
@@ -887,17 +851,17 @@ async def word_audio(word_id: str, user: dict = Depends(get_current_user)):
 
 @api.post("/words/{word_id}/ai-coach")
 async def ai_coach(word_id: str, user: dict = Depends(get_current_user)):
-    w = await db.words.find_one({"id": word_id}, {"_id": 0})
+    w = await repo.get_word(word_id)
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
 
-    cached = await db.ai_coach_content.find_one({"word_id": word_id}, {"_id": 0})
+    cached = await repo.get_ai_coach_content(word_id)
     if cached:
         return {"content": cached["content"], "provenance": "ai_generated", "cached": True}
 
     tier = user.get("tier", "free")
     ent = entitlements_for(tier)
-    used = await ai_coach_used_today(user["user_id"])
+    used = await repo.count_ai_coach_today(user["user_id"])
     if used >= ent["ai_coach_per_day"]:
         raise HTTPException(status_code=402, detail="Daily AI Coach limit reached. Upgrade to Pro for unlimited.")
 
@@ -934,10 +898,12 @@ async def ai_coach(word_id: str, user: dict = Depends(get_current_user)):
     if not content:
         raise HTTPException(status_code=502, detail="Could not generate a good explanation, try again")
 
-    await db.ai_coach_content.insert_one({"word_id": word_id, "content": content,
-                                          "provenance": "ai_generated", "status": "PUBLISHED", "created_at": now_utc()})
-    await db.ai_coach_usage.insert_one({"user_id": user["user_id"], "word_id": word_id, "date": date.today().isoformat(), "created_at": now_utc()})
-    await log_event(user["user_id"], "ai_coach_generated", {"word_id": word_id})
+    await repo.insert_ai_coach_content({"word_id": word_id, "content": content,
+                                        "provenance": "ai_generated", "status": "PUBLISHED",
+                                        "created_at": now_utc()})
+    await repo.insert_ai_coach_usage({"user_id": user["user_id"], "word_id": word_id,
+                                      "date": date.today().isoformat(), "created_at": now_utc()})
+    await repo.log_event(user["user_id"], "ai_coach_generated", {"word_id": word_id})
     return {"content": content, "provenance": "ai_generated", "cached": False}
 
 
@@ -968,11 +934,7 @@ class BuildBody(BaseModel):
 async def slipping_word_ids(user_id: str) -> List[str]:
     now = now_utc()
     horizon = now + timedelta(days=2)
-    progresses = await db.user_word_progress.find(
-        {"user_id": user_id, "status": {"$in": ["SEEN", "LEARNING", "RECALLING"]}}, {"_id": 0}
-    ).to_list(3000)
-    # candidate set: due soon (within horizon) and not yet solid — preserves the
-    # existing nudge behavior; the adaptive slipping score is used for ranking.
+    progresses = await repo.get_progress_by_statuses(user_id, ["SEEN", "LEARNING", "RECALLING"])
     candidates = [p for p in progresses
                   if ensure_aware(p.get("next_review_at")) and ensure_aware(p["next_review_at"]) <= horizon
                   and p.get("mastery_score", 0) < 90]
@@ -980,7 +942,7 @@ async def slipping_word_ids(user_id: str) -> List[str]:
     def rank(p):
         s = calculate_slipping(p, now)["slipping_score"]
         overdue = (now - ensure_aware(p["next_review_at"])).total_seconds()
-        return (-s, -overdue, p.get("mastery_score", 0))
+        return (-s, -overdue, float(p.get("mastery_score", 0)))
     candidates.sort(key=rank)
     return [p["word_id"] for p in candidates][:20]
 
@@ -988,9 +950,8 @@ async def slipping_word_ids(user_id: str) -> List[str]:
 @api.get("/review/slipping")
 async def review_slipping(user: dict = Depends(get_current_user)):
     ids = await slipping_word_ids(user["user_id"])
-    prog = {p["word_id"]: p for p in await db.user_word_progress.find(
-        {"user_id": user["user_id"], "word_id": {"$in": ids}}, {"_id": 0}).to_list(100)}
-    words = {w["id"]: w for w in await db.words.find({"id": {"$in": ids}}, {"_id": 0}).to_list(100)}
+    prog = {p["word_id"]: p for p in await repo.find_progress_by_words(user["user_id"], ids)}
+    words = {w["id"]: w for w in await repo.find_words_by_ids(ids)}
     items = []
     for wid in ids:
         w = words.get(wid)
@@ -1003,7 +964,7 @@ async def review_slipping(user: dict = Depends(get_current_user)):
             "id": wid, "headword": w["headword"], "cefr": w.get("cefr"),
             "simple_definition": w["simple_definition"],
             "status": p.get("status", "SEEN"),
-            "mastery_score": round(p.get("mastery_score", 0)),
+            "mastery_score": round(float(p.get("mastery_score", 0))),
             "overdue_days": overdue_days,
         })
     return {"count": len(items), "words": items}
@@ -1012,18 +973,13 @@ async def review_slipping(user: dict = Depends(get_current_user)):
 @api.get("/articles")
 async def list_articles(level: Optional[str] = None, topic: Optional[str] = None,
                         user: dict = Depends(get_current_user)):
-    q: dict = {}
-    if level:
-        q["level"] = level
-    if topic:
-        q["topic"] = topic
-    arts = await db.articles.find(q, {"_id": 0, "body": 0}).to_list(100)
+    arts = await repo.get_articles(level, topic)
     return {"articles": arts}
 
 
 @api.get("/articles/{article_id}")
 async def get_article(article_id: str, user: dict = Depends(get_current_user)):
-    art = await db.articles.find_one({"id": article_id}, {"_id": 0})
+    art = await repo.get_article_by_id(article_id)
     if not art:
         raise HTTPException(status_code=404, detail="Article not found")
     return {"article": art}
@@ -1088,9 +1044,9 @@ async def lookup(word: str = Query(...), user: dict = Depends(get_current_user))
     norm = re.sub(r"[^a-z]", "", word.lower())
     if not norm:
         raise HTTPException(status_code=400, detail="Invalid word")
-    w = await db.words.find_one({"headword": norm}, {"_id": 0})
+    w = await repo.get_word_by_headword(norm)
     if w:
-        saved = await db.saved_words.find_one({"user_id": user["user_id"], "word_id": w["id"]})
+        saved = await repo.find_saved_word(user["user_id"], w["id"])
         return {"in_bank": True, "id": w["id"], "headword": w["headword"],
                 "phonetic": w.get("phonetic"), "simple_definition": w["simple_definition"],
                 "example": w.get("example"), "cefr": w.get("cefr"),
@@ -1102,17 +1058,12 @@ async def lookup(word: str = Query(...), user: dict = Depends(get_current_user))
 
 
 async def ensure_word(headword: str) -> Optional[str]:
-    """Return a word id for `headword`, creating an imported entry if needed.
-
-    Dedupe against the canonical key so the same word (differing only by case or
-    punctuation) never becomes a second canonical record.
-    """
+    """Return a word id for `headword`, creating an imported entry if needed."""
     norm = re.sub(r"[^a-z]", "", headword.lower())
     if not norm:
         return None
     ckey = normalize_headword(headword)
-    existing = await db.words.find_one(
-        {"$or": [{"canonical_key": ckey}, {"headword": norm}]}, {"_id": 0, "id": 1})
+    existing = await repo.get_word_by_canonical_or_headword(ckey, norm)
     if existing:
         return existing["id"]
     d = await dictionary_lookup(norm)
@@ -1120,7 +1071,7 @@ async def ensure_word(headword: str) -> Optional[str]:
         return None
     raw = {"headword": norm, "cefr": "B1", "topic": "everyday", "frequency": 3,
            "academic_importance": 2, "easy_meaning": d.get("simple_definition"), **d}
-    outcome = await ingest_word(db, raw, provenance="IMPORTED")
+    outcome = await ingest_word(repo, raw, provenance="IMPORTED")
     return outcome.get("id")
 
 
@@ -1145,11 +1096,11 @@ def tokenize_vocab(text: str) -> List[str]:
 
 
 async def classify_words(user_id: str, candidates: List[str]) -> dict:
-    bank = {w["headword"]: w for w in await db.words.find(
-        {"headword": {"$in": candidates}}, {"_id": 0, "id": 1, "headword": 1, "simple_definition": 1, "cefr": 1}).to_list(200)}
+    bank_list = await repo.find_words_by_headwords(candidates)
+    bank = {w["headword"]: w for w in bank_list}
     ids = [w["id"] for w in bank.values()]
-    prog = {p["word_id"]: p.get("status", "NEW") for p in await db.user_word_progress.find(
-        {"user_id": user_id, "word_id": {"$in": ids}}, {"_id": 0}).to_list(500)}
+    prog = {p["word_id"]: p.get("status", "NEW")
+            for p in await repo.find_progress_by_words(user_id, ids)}
     known, learning, new = [], [], []
     for hw in candidates:
         b = bank.get(hw)
@@ -1195,18 +1146,18 @@ async def extract_pdf(file: UploadFile = File(...), user: dict = Depends(get_cur
 
 @api.post("/practice/build")
 async def practice_build(body: BuildBody, user: dict = Depends(get_current_user)):
-    # ensure all requested words exist (import non-bank ones), then build questions
     resolved: List[str] = []
     for token in body.word_ids[:20]:
-        wid = token if await db.words.find_one({"id": token}, {"_id": 1}) else await ensure_word(token)
+        wid = token if await repo.word_exists(token) else await ensure_word(token)
         if wid:
             resolved.append(wid)
     if not resolved:
         return {"questions": [], "count": 0}
     pool = await all_words_cache()
     pool_by_id = {w["id"]: w for w in pool}
-    progresses = {p["word_id"]: p for p in await db.user_word_progress.find(
-        {"user_id": user["user_id"], "word_id": {"$in": resolved}}, {"_id": 0}).to_list(200)}
+    progresses = {p["word_id"]: p for p in await repo.find_progress_by_words(
+        user["user_id"], resolved
+    )}
     questions = []
     session_modes: List[str] = []
     for wid in resolved:
@@ -1223,7 +1174,7 @@ async def practice_build(body: BuildBody, user: dict = Depends(get_current_user)
                      "example": w.get("example"), "cefr": w.get("cefr"),
                      "part_of_speech": w.get("part_of_speech"), "synonyms": w.get("synonyms", [])[:3]}
         questions.append(q)
-    await log_event(user["user_id"], "learning_session_started", {"source": "import", "count": len(questions)})
+    await repo.log_event(user["user_id"], "learning_session_started", {"source": "import", "count": len(questions)})
     return {"questions": questions, "count": len(questions), "source": "import"}
 
 
@@ -1237,20 +1188,20 @@ async def root():
 
 
 async def seed_content():
-    if await db.words.count_documents({}) == 0:
+    if await repo.count_collection("words") == 0:
         docs = []
         for w in WORDS:
             wid = slugify(w["headword"])
             docs.append({**w, "id": wid, "headword": w["headword"].lower(),
                          "status": "PUBLISHED", "provenance": "CURATED", "created_at": now_utc()})
         if docs:
-            await db.words.insert_many(docs)
-    if await db.topics.count_documents({}) == 0:
-        await db.topics.insert_many([dict(t) for t in TOPICS])
-    if await db.exams.count_documents({}) == 0:
-        await db.exams.insert_many([dict(e) for e in EXAMS])
-    if await db.articles.count_documents({}) == 0:
-        await db.articles.insert_many([dict(a) for a in ARTICLES])
+            await repo.seed_words(docs)
+    if await repo.count_collection("topics") == 0:
+        await repo.seed_topics([dict(t) for t in TOPICS])
+    if await repo.count_collection("exams") == 0:
+        await repo.seed_exams([dict(e) for e in EXAMS])
+    if await repo.count_collection("articles") == 0:
+        await repo.seed_articles([dict(a) for a in ARTICLES])
 
     # Merge AI-generated, validated word bank (idempotent upsert by id).
     bank_path = os.path.join(ROOT_DIR, "word_bank.json")
@@ -1265,25 +1216,17 @@ async def seed_content():
             if not hw:
                 continue
             wid = slugify(hw)
-            if await db.words.find_one({"id": wid}, {"_id": 1}):
+            if await repo.word_exists(wid):
                 continue
-            await db.words.update_one(
-                {"id": wid},
-                {"$set": {**w, "id": wid, "headword": hw, "status": "PUBLISHED",
-                          "provenance": "AI_GENERATED", "created_at": now_utc()}},
-                upsert=True,
-            )
+            await repo.upsert_word(wid, {
+                **w, "id": wid, "headword": hw, "status": "PUBLISHED",
+                "provenance": "AI_GENERATED", "created_at": now_utc(),
+            })
 
 
 async def migrate_canonical():
-    """Idempotently upgrade every word to the canonical schema (Phase A).
-
-    Preserves each word's existing ``id``, ``headword`` and all legacy fields;
-    only computes ``canonical_key`` + ``relations`` (with canonical refs) and
-    backfills structured ``meanings`` / ``pronunciation`` + optional placeholders.
-    Words already at the current schema version are skipped, so re-runs are cheap.
-    """
-    all_words = await db.words.find({}, {"_id": 0}).to_list(200000)
+    """Idempotently upgrade every word to the canonical schema (Phase A)."""
+    all_words = await repo.load_all_words_full()
     id_by_key: dict = {}
     for w in all_words:
         key = normalize_headword(w.get("headword", ""))
@@ -1294,9 +1237,9 @@ async def migrate_canonical():
     migrated = 0
     for w in pending:
         try:
-            await db.words.update_one({"id": w["id"]}, {"$set": to_canonical_storage(w, id_by_key)})
+            await repo.update_word(w["id"], to_canonical_storage(w, id_by_key))
             migrated += 1
-        except Exception as e:  # pragma: no cover
+        except Exception as e:
             print(f"[canonical] migrate failed for {w.get('id')}: {e}")
     if migrated:
         print(f"[canonical] migrated {migrated} word(s) to schema v1")
@@ -1304,30 +1247,11 @@ async def migrate_canonical():
 
 @app.on_event("startup")
 async def startup():
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("user_id", unique=True)
-    await db.user_sessions.create_index("session_token", unique=True)
-    await db.user_sessions.create_index("user_id")
-    await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
-    await db.words.create_index("id", unique=True)
-    await db.words.create_index("headword")
-    await db.words.create_index("topic")
-    await db.words.create_index("cefr")
-    await db.words.create_index("exam_relevance")
-    await db.user_word_progress.create_index([("user_id", 1), ("word_id", 1)], unique=True)
-    await db.user_word_progress.create_index([("user_id", 1), ("next_review_at", 1)])
-    await db.saved_words.create_index([("user_id", 1), ("word_id", 1)], unique=True)
-    await db.profiles.create_index("user_id", unique=True)
-    await db.analytics_events.create_index("user_id")
+    await repo.setup_indexes()
     await seed_content()
     await migrate_canonical()
-    await migrate_content_lifecycle(db)
-    await resolve_all_relationship_refs(db)
-    # Uniqueness safeguard against duplicate canonical words (after backfill).
-    try:
-        await db.words.create_index("canonical_key", unique=True)
-    except Exception as e:  # pragma: no cover
-        print(f"[canonical] canonical_key unique index skipped: {e}")
+    await migrate_content_lifecycle(repo)
+    await resolve_all_relationship_refs(repo)
 
 
 app.include_router(api)

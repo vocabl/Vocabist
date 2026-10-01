@@ -1,18 +1,8 @@
-"""Content ingestion (Phase B).
+"""Content ingestion pipeline (Phase B/C) — repository-backed.
 
-Controlled path for creating/updating canonical vocabulary. Thin DB coupling on
-top of the pure ``content_validation`` + ``vocab_schema`` modules so the same
-logic is reusable by ``/api/words/import``, bulk imports, future admin tools,
-AI content pipelines, and migration scripts.
-
-Guarantees:
-- normalize → canonical_key → detect existing → validate → persist only when
-  permitted;
-- never silently creates duplicates (dedupe by canonical_key);
-- never overwrites an existing trusted record;
-- AI-generated content never auto-publishes (enters REVIEW) and must pass
-  structural validation before storage;
-- idempotent and safe to re-run.
+Preserves original ingest logic exactly.  Only direct ``db.*`` calls have been
+replaced with DatabaseRepository method calls.  All business rules, validation
+flow, provenance handling, and lifecycle migration are unchanged.
 """
 from __future__ import annotations
 
@@ -36,10 +26,9 @@ def resolve_status(provenance: str, result, requested_status: Optional[str]) -> 
     """Decide the content status for a *new* record.
 
     - AI_GENERATED never auto-publishes → REVIEW.
-    - IMPORTED (dictionary-backed) stays PUBLISHED to preserve existing
-      /api/words/import behavior (only reached when structurally valid).
-    - CURATED / ADMIN_CREATED honor the requested status, but any warnings
-      downgrade a PUBLISHED request to REVIEW (errors already blocked storage).
+    - IMPORTED (dictionary-backed) stays PUBLISHED to preserve existing behavior.
+    - CURATED / ADMIN_CREATED honor requested_status, but warnings downgrade
+      PUBLISHED → REVIEW.
     """
     prov = provenance
     if prov == "AI_GENERATED":
@@ -54,19 +43,24 @@ def resolve_status(provenance: str, result, requested_status: Optional[str]) -> 
     return req
 
 
-async def _load_context(db) -> Dict[str, Any]:
-    words = await db.words.find({}, {"_id": 0, "id": 1, "headword": 1}).to_list(200000)
+async def _load_context(repo) -> Dict[str, Any]:
+    """Build the shared context (id_by_key map + known exam slugs)."""
+    words = await repo.load_all_words_minimal()
     id_by_key: Dict[str, str] = {}
     for w in words:
         k = normalize_headword(w.get("headword", ""))
         if k and k not in id_by_key:
             id_by_key[k] = w["id"]
-    exam_slugs = {e["slug"] for e in await db.exams.find({}, {"_id": 0, "slug": 1}).to_list(1000)}
-    return {"id_by_key": id_by_key, "known_word_ids": set(id_by_key.values()), "exam_slugs": exam_slugs}
+    exam_slugs = await repo.get_exam_slugs()
+    return {
+        "id_by_key": id_by_key,
+        "known_word_ids": set(id_by_key.values()),
+        "exam_slugs": exam_slugs,
+    }
 
 
 async def ingest_word(
-    db,
+    repo,
     raw: Dict[str, Any],
     *,
     provenance: str,
@@ -87,7 +81,7 @@ async def ingest_word(
 
     own_context = context is None
     if own_context:
-        context = await _load_context(db)
+        context = await _load_context(repo)
 
     # 1) dedupe by canonical_key — return existing, never overwrite trusted content
     existing_id = context["id_by_key"].get(ckey)
@@ -117,19 +111,19 @@ async def ingest_word(
         "lifecycle_version": 1,
         "created_at": _now(),
     })
-    await db.words.update_one({"id": wid}, {"$set": doc}, upsert=True)
+    await repo.upsert_word(wid, doc)
 
     # keep shared context consistent for deterministic bulk runs
     context["id_by_key"][ckey] = wid
     context["known_word_ids"].add(wid)
 
     # targeted re-resolution: fill previously-unresolved refs now pointing here
-    await refresh_refs_for_new_key(db, ckey, wid)
+    await refresh_refs_for_new_key(repo, ckey, wid)
     return {"action": "created", "id": wid, "status": status, "validation": res.to_dict()}
 
 
 async def bulk_ingest(
-    db,
+    repo,
     records: List[Dict[str, Any]],
     *,
     provenance: str,
@@ -137,24 +131,24 @@ async def bulk_ingest(
 ) -> Dict[str, Any]:
     """Ingest many records deterministically and idempotently.
 
-    Each record is independent — one bad record never corrupts the rest. Safe to
-    re-run: already-present records report ``exists``.
+    Each record is independent — one bad record never corrupts the rest.
+    Safe to re-run: already-present records report ``exists``.
     """
-    context = await _load_context(db)
+    context = await _load_context(repo)
     results: List[Dict[str, Any]] = []
     counts = {"created": 0, "exists": 0, "rejected": 0}
     for i, rec in enumerate(records):
-        outcome = await ingest_word(db, rec, provenance=provenance,
+        outcome = await ingest_word(repo, rec, provenance=provenance,
                                     requested_status=requested_status, context=context)
         counts[outcome["action"]] = counts.get(outcome["action"], 0) + 1
         results.append({"index": i, "headword": rec.get("headword"), **outcome})
     return {"total": len(records), **counts, "results": results}
 
 
-async def quality_report(db) -> Dict[str, Any]:
+async def quality_report(repo) -> Dict[str, Any]:
     """Read-only validation pass over the whole bank. Never modifies records."""
-    context = await _load_context(db)
-    words = await db.words.find({}, {"_id": 0}).to_list(200000)
+    context = await _load_context(repo)
+    words = await repo.load_all_words_full()
 
     key_owners: Dict[str, List[str]] = {}
     for w in words:
@@ -192,19 +186,17 @@ async def quality_report(db) -> Dict[str, Any]:
         "invalid_status": invalid_status,
         "issues_by_code": issues_by_code,
         "invalid_samples": invalid[:50],
-        "relationships": await relationship_quality_metrics(db),
+        "relationships": await relationship_quality_metrics(repo),
     }
 
 
-async def migrate_content_lifecycle(db) -> int:
-    """Idempotently standardize provenance + ensure a lifecycle status on every
-    existing word, without ever downgrading working (PUBLISHED) content.
+async def migrate_content_lifecycle(repo) -> int:
+    """Idempotently standardize provenance + ensure lifecycle_version on every
+    existing word, without ever downgrading live PUBLISHED content.
 
-    Existing records keep their status (all currently PUBLISHED), so the live
-    app is unaffected. Historical provenance is preserved under
-    ``provenance_original`` when it is rewritten to the standardized value.
+    Previously accepted a Motor ``db`` arg; now accepts a DatabaseRepository.
     """
-    pending = await db.words.find({"lifecycle_version": {"$ne": 1}}, {"_id": 0}).to_list(200000)
+    pending = await repo.find_words_needing_lifecycle()
     migrated = 0
     for w in pending:
         update: Dict[str, Any] = {"lifecycle_version": 1}
@@ -214,10 +206,10 @@ async def migrate_content_lifecycle(db) -> int:
             if not w.get("provenance_original"):
                 update["provenance_original"] = w.get("provenance")
         elif not w.get("provenance"):
-            update["provenance"] = "CURATED"  # grandfather untagged legacy content
+            update["provenance"] = "CURATED"
         status = w.get("status")
         if status not in CONTENT_STATUS_SET:
-            update["status"] = "PUBLISHED"  # grandfather existing working content
-        await db.words.update_one({"id": w["id"]}, {"$set": update})
+            update["status"] = "PUBLISHED"
+        await repo.update_word(w["id"], update)
         migrated += 1
     return migrated
