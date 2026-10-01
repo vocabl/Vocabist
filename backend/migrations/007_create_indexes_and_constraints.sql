@@ -40,8 +40,23 @@ CREATE INDEX IF NOT EXISTS words_cefr_idx
 CREATE INDEX IF NOT EXISTS words_exam_relevance_gin
     ON public.words USING GIN (exam_relevance);
 
--- Full-text search on headword + definition
--- Replaces MongoDB $regex queries on headword/simple_definition
+-- ── PREFLIGHT CORRECTION: Trigram indexes for ILIKE search ──
+-- The FastAPI list_words() uses MongoDB $regex (case-insensitive substring).
+-- PostgreSQL equivalent is ILIKE '%term%'.
+-- tsvector (below) uses English stemming and CANNOT serve ILIKE queries.
+-- pg_trgm GIN indexes enable index-accelerated ILIKE '%term%' lookups.
+-- These indexes are REQUIRED for equivalent search behavior in Stage 3.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX IF NOT EXISTS words_headword_trgm_idx
+    ON public.words USING GIN (headword gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS words_definition_trgm_idx
+    ON public.words USING GIN (simple_definition gin_trgm_ops);
+
+-- Full-text search on headword + definition (ADDITIVE — future full-word search)
+-- NOTE: This index does NOT replace ILIKE. It uses English stemming.
+-- Use tsvector for future full-text search; use trigram indexes for ILIKE.
 CREATE INDEX IF NOT EXISTS words_fts_idx
     ON public.words USING GIN (
         to_tsvector('english',
