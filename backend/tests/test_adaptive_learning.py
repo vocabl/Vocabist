@@ -28,7 +28,7 @@ from adaptive_learning import (  # noqa: E402
     INTERVAL_MAX_DAYS,
 )
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vocabist-staging.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://learn-preview-13.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
