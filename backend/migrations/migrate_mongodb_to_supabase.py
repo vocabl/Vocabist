@@ -60,9 +60,24 @@ MIGRATION ORDER (FK-safe)
 IDEMPOTENCY STRATEGY
 --------------------
   Every INSERT uses Supabase's upsert with ignore_duplicates=True.
-  This maps to: INSERT INTO ... ON CONFLICT DO NOTHING
-  Re-running the script will skip already-migrated records.
-  The migration_state.json file caches per-collection completion status.
+  This maps to: INSERT INTO ... ON CONFLICT (conflict_column) DO NOTHING
+
+  Tables with natural PKs (topics, exams, articles, words, users, profiles,
+  user_sessions, subscriptions, user_word_progress, saved_words,
+  ai_coach_content, tts_cache):
+    → ON CONFLICT (primary_key) DO NOTHING
+
+  Append-only tables (study_sessions, ai_coach_usage, analytics_events):
+    → Each migrated record carries its MongoDB ObjectId as source_mongo_id
+    → ON CONFLICT (source_mongo_id) DO NOTHING
+    → Backed by UNIQUE INDEX on source_mongo_id (migration 008)
+    → New Supabase-native records (post-migration) have source_mongo_id=NULL
+      and are unaffected (PostgreSQL allows multiple NULLs in a unique index)
+    → migration_state.json is an OPTIMISATION only — not the sole guard
+
+  PRE-REQUISITE: Run migration 008_add_source_mongo_id.sql in Supabase
+  Dashboard → SQL Editor BEFORE executing the actual migration.
+  The dry-run does not require this (transforms only, no DB interaction).
 
 RETRY STRATEGY
 --------------
@@ -315,8 +330,14 @@ def transform_saved_word(doc: dict) -> dict:
 
 
 def transform_study_session(doc: dict) -> dict:
+    # Extract MongoDB _id BEFORE clean_doc() removes it.
+    # The 24-char hex ObjectId becomes source_mongo_id TEXT UNIQUE,
+    # which is the intrinsic dedup key for this append-only table.
+    source_id = str(doc["_id"]) if doc.get("_id") is not None else None
     d = clean_doc(doc)
     d = sanitize_timestamps(d)
+    if source_id:
+        d["source_mongo_id"] = source_id
     return d
 
 
@@ -328,11 +349,15 @@ def transform_ai_coach_content(doc: dict) -> dict:
 
 
 def transform_ai_coach_usage(doc: dict) -> dict:
+    # Extract MongoDB _id BEFORE clean_doc() removes it.
+    source_id = str(doc["_id"]) if doc.get("_id") is not None else None
     d = clean_doc(doc)
     d = sanitize_timestamps(d)
     # date: MongoDB stores as string or datetime
     if "date" in d:
         d["date"] = to_date_str(d["date"])
+    if source_id:
+        d["source_mongo_id"] = source_id
     return d
 
 
@@ -348,11 +373,15 @@ def transform_tts_cache(doc: dict) -> dict:
 
 
 def transform_analytics_event(doc: dict) -> dict:
+    # Extract MongoDB _id BEFORE clean_doc() removes it.
+    source_id = str(doc["_id"]) if doc.get("_id") is not None else None
     d = clean_doc(doc)
     d = sanitize_timestamps(d)
     # props: dict → JSONB, ensure it's never None
     if d.get("props") is None:
         d["props"] = {}
+    if source_id:
+        d["source_mongo_id"] = source_id
     return d
 
 
@@ -446,8 +475,8 @@ MIGRATION_ORDER = [
         "supabase_table":   "study_sessions",
         "pk_field":         None,                    # BIGSERIAL PK
         "transform":        transform_study_session,
-        "on_conflict":      None,                    # no natural PK — use ignore on id
-        "description":      "Practice session log (→ users)",
+        "on_conflict":      "source_mongo_id",       # intrinsic dedup via MongoDB _id
+        "description":      "Practice session log (→ users) [idempotent via source_mongo_id]",
     },
     {
         "mongo_collection": "ai_coach_content",
@@ -462,8 +491,8 @@ MIGRATION_ORDER = [
         "supabase_table":   "ai_coach_usage",
         "pk_field":         None,
         "transform":        transform_ai_coach_usage,
-        "on_conflict":      None,
-        "description":      "AI Coach usage log (→ users, → words)",
+        "on_conflict":      "source_mongo_id",       # intrinsic dedup via MongoDB _id
+        "description":      "AI Coach usage log (→ users, → words) [idempotent via source_mongo_id]",
     },
     {
         "mongo_collection": "tts_cache",
@@ -478,8 +507,8 @@ MIGRATION_ORDER = [
         "supabase_table":   "analytics_events",
         "pk_field":         None,
         "transform":        transform_analytics_event,
-        "on_conflict":      None,
-        "description":      "Analytics event log (→ users)",
+        "on_conflict":      "source_mongo_id",       # intrinsic dedup via MongoDB _id
+        "description":      "Analytics event log (→ users) [idempotent via source_mongo_id]",
     },
 ]
 
