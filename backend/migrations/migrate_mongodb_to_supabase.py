@@ -761,8 +761,11 @@ async def migrate_collection(db, supabase: Client, cdef: dict,
 
     log.info(f"  Migrating: {mongo_col} → {supa_tbl}  [{cdef['description']}]")
 
-    # Fetch all docs from MongoDB
-    docs = await db[mongo_col].find({}, {"_id": 0}).to_list(None)
+    # Fetch all docs from MongoDB — include _id so transform functions can
+    # extract source_mongo_id for append-only tables (study_sessions,
+    # ai_coach_usage, analytics_events).  clean_doc() removes _id from the
+    # payload before any Supabase insert, so the raw ObjectId is never sent.
+    docs = await db[mongo_col].find({}).to_list(None)
     source_count = len(docs)
     log.info(f"    Source documents: {source_count}")
 
