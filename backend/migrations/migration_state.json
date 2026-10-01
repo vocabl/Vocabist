@@ -1,0 +1,17 @@
+{
+  "topics": "DONE",
+  "exams": "DONE",
+  "articles": "DONE",
+  "words": "DONE",
+  "users": "DONE",
+  "profiles": "DONE",
+  "user_sessions": "DONE",
+  "subscriptions": "DONE",
+  "user_word_progress": "DONE",
+  "saved_words": "DONE",
+  "study_sessions": "PARTIAL (failed=3)",
+  "ai_coach_content": "DONE",
+  "ai_coach_usage": "PARTIAL (failed=4)",
+  "tts_cache": "DONE",
+  "analytics_events": "PARTIAL (failed=63)"
+}

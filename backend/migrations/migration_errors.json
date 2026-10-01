@@ -1,1 +1,352 @@
-[]
+[
+  {
+    "table": "study_sessions",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "study_sessions",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "study_sessions",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "ai_coach_usage",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "ai_coach_usage",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "ai_coach_usage",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "ai_coach_usage",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_623fa4771039",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_623fa4771039",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_623fa4771039",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_11dc23732ebf",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_11dc23732ebf",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_11dc23732ebf",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_de3976a35447",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_de3976a35447",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_de3976a35447",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_de3976a35447",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_b15f8713c168",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f603e58c43be",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f603e58c43be",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f603e58c43be",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f603e58c43be",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_19770e07fdf7",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_19770e07fdf7",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_31aa0c2f0eaf",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_31aa0c2f0eaf",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_31aa0c2f0eaf",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_7eed2d37ff60",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_9b611b37c16f",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_f1ff56ef6286",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_93902335dbd6",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_93902335dbd6",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_93902335dbd6",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_93902335dbd6",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e44667410985",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e44667410985",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e44667410985",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_e7e9862ca155",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_b7de0f8f4452",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_3dc942837717",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  },
+  {
+    "table": "analytics_events",
+    "record": "user_788f9246f940",
+    "error": "{'message': 'there is no unique or exclusion constraint matching the ON CONFLICT specification', 'code': '42P10', 'hint': None, 'details': None}"
+  }
+]
