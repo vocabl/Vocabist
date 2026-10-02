@@ -374,6 +374,12 @@ class SupabaseRepository(DatabaseRepository):
         r = await sb.table("words").select("id,headword").execute()
         return r.data or []
 
+    async def load_all_word_ids(self) -> Set[str]:
+        """Single bulk query — avoids N individual HTTP round-trips."""
+        sb = await self._client()
+        r = await sb.table("words").select("id").execute()
+        return {row["id"] for row in (r.data or []) if row.get("id")}
+
     async def load_all_words_full(self) -> List[Dict[str, Any]]:
         sb = await self._client()
         r = await sb.table("words").select("*").execute()

@@ -3,6 +3,14 @@
 Preserves original ingest logic exactly.  Only direct ``db.*`` calls have been
 replaced with DatabaseRepository method calls.  All business rules, validation
 flow, provenance handling, and lifecycle migration are unchanged.
+
+Also contains standalone maintenance/migration helpers that are intentionally
+NOT run on every application startup:
+
+    migrate_canonical(repo)   — upgrade all words to canonical schema v1
+    migrate_content_lifecycle(repo) — standardise provenance + lifecycle_version
+
+These are invoked explicitly via ``backend/maintenance.py``.
 """
 from __future__ import annotations
 
@@ -212,4 +220,39 @@ async def migrate_content_lifecycle(repo) -> int:
             update["status"] = "PUBLISHED"
         await repo.update_word(w["id"], update)
         migrated += 1
+    return migrated
+
+
+async def migrate_canonical(repo) -> int:
+    """Idempotently upgrade every word to the canonical schema v1 (Phase A).
+
+    Loads all words, resolves headword → canonical_key mapping, then writes
+    the canonical storage representation for any word that has not yet been
+    migrated (``schema_version != 1`` or missing ``canonical_key``).
+
+    Returns the number of words actually updated.
+
+    MAINTENANCE OPERATION — NOT called on startup.
+    Invoke explicitly via ``backend/maintenance.py canonical``.
+    """
+    all_words = await repo.load_all_words_full()
+    id_by_key: Dict[str, str] = {}
+    for w in all_words:
+        key = normalize_headword(w.get("headword", ""))
+        if key and key not in id_by_key:
+            id_by_key[key] = w["id"]
+
+    pending = [
+        w for w in all_words
+        if w.get("schema_version") != 1 or not w.get("canonical_key")
+    ]
+    migrated = 0
+    for w in pending:
+        try:
+            await repo.update_word(w["id"], to_canonical_storage(w, id_by_key))
+            migrated += 1
+        except Exception as e:
+            print(f"[canonical] migrate failed for {w.get('id')}: {e}")
+    if migrated:
+        print(f"[canonical] migrated {migrated} word(s) to schema v1")
     return migrated

@@ -120,6 +120,10 @@ class DatabaseRepository:
         """All words with id + headword — for index building."""
         raise NotImplementedError
 
+    async def load_all_word_ids(self) -> Set[str]:
+        """Return set of all word IDs — single bulk query for existence checks."""
+        raise NotImplementedError
+
     async def load_all_words_full(self) -> List[Dict[str, Any]]:
         """All words with all fields — for migration/resolve passes."""
         raise NotImplementedError

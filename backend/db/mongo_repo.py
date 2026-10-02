@@ -202,6 +202,10 @@ class MongoRepository(DatabaseRepository):
             {}, {"_id": 0, "id": 1, "headword": 1}
         ).to_list(200000)
 
+    async def load_all_word_ids(self) -> Set[str]:
+        docs = await self._db.words.find({}, {"_id": 0, "id": 1}).to_list(200000)
+        return {d["id"] for d in docs if d.get("id")}
+
     async def load_all_words_full(self) -> List[Dict[str, Any]]:
         return await self._db.words.find({}, _PROJ_NO_ID).to_list(200000)
 

@@ -28,7 +28,7 @@ from vocab_schema import (
     normalize_headword,
     to_canonical_storage,
 )
-from content_ingest import ingest_word, migrate_content_lifecycle
+from content_ingest import ingest_word, migrate_content_lifecycle, migrate_canonical
 from graph_service import build_word_graph, resolve_all_relationship_refs
 from db import get_db
 
@@ -812,7 +812,14 @@ async def word_audio(word_id: str, user: dict = Depends(get_current_user)):
     if not w:
         raise HTTPException(status_code=404, detail="Word not found")
     if w.get("audio"):
-        return w["audio"]
+        cached = dict(w["audio"])
+        # Normalize any legacy relative tts_url (/tts/xxx.mp3) to absolute.
+        # Needed for audio entries written before the absolute-URL fix.
+        rel = cached.get("tts_url") or ""
+        if rel and not rel.startswith("http") and APP_URL:
+            # Legacy path is /tts/{key}.mp3 — the API prefix is /api
+            cached["tts_url"] = f"{APP_URL}/api{rel}"
+        return cached
 
     us_url = uk_url = None
     try:
@@ -835,7 +842,14 @@ async def word_audio(word_id: str, user: dict = Depends(get_current_user)):
     if not us_url and not uk_url:
         try:
             key = await make_tts(w["headword"])
-            tts_url = f"/tts/{key}.mp3"  # relative to /api; frontend prefixes with its own base
+            # Return an absolute URL so external clients (tests, native apps)
+            # can fetch the audio without needing to know the server origin.
+            # Fall back to a relative path only when APP_URL is not configured
+            # (e.g. pure local development with no env var).
+            if APP_URL:
+                tts_url = f"{APP_URL}/api/tts/{key}.mp3"
+            else:
+                tts_url = f"/tts/{key}.mp3"
         except Exception:
             tts_url = None
 
@@ -1204,6 +1218,8 @@ async def seed_content():
         await repo.seed_articles([dict(a) for a in ARTICLES])
 
     # Merge AI-generated, validated word bank (idempotent upsert by id).
+    # Use a single bulk query to fetch all existing IDs to avoid N individual
+    # round-trips per word (critical for Supabase HTTP latency).
     bank_path = os.path.join(ROOT_DIR, "word_bank.json")
     if os.path.exists(bank_path):
         try:
@@ -1211,47 +1227,39 @@ async def seed_content():
                 bank = json.load(f)
         except Exception:
             bank = []
-        for w in bank:
-            hw = str(w.get("headword", "")).strip().lower()
-            if not hw:
-                continue
-            wid = slugify(hw)
-            if await repo.word_exists(wid):
-                continue
-            await repo.upsert_word(wid, {
-                **w, "id": wid, "headword": hw, "status": "PUBLISHED",
-                "provenance": "AI_GENERATED", "created_at": now_utc(),
-            })
+        if bank:
+            existing_ids = await repo.load_all_word_ids()
+            for w in bank:
+                hw = str(w.get("headword", "")).strip().lower()
+                if not hw:
+                    continue
+                wid = slugify(hw)
+                if wid in existing_ids:
+                    continue
+                await repo.upsert_word(wid, {
+                    **w, "id": wid, "headword": hw, "status": "PUBLISHED",
+                    "provenance": "AI_GENERATED", "created_at": now_utc(),
+                })
 
-
-async def migrate_canonical():
-    """Idempotently upgrade every word to the canonical schema (Phase A)."""
-    all_words = await repo.load_all_words_full()
-    id_by_key: dict = {}
-    for w in all_words:
-        key = normalize_headword(w.get("headword", ""))
-        if key and key not in id_by_key:
-            id_by_key[key] = w["id"]
-
-    pending = [w for w in all_words if w.get("schema_version") != 1 or not w.get("canonical_key")]
-    migrated = 0
-    for w in pending:
-        try:
-            await repo.update_word(w["id"], to_canonical_storage(w, id_by_key))
-            migrated += 1
-        except Exception as e:
-            print(f"[canonical] migrate failed for {w.get('id')}: {e}")
-    if migrated:
-        print(f"[canonical] migrated {migrated} word(s) to schema v1")
 
 
 @app.on_event("startup")
 async def startup():
+    """Lightweight startup: index creation + conditional seed only.
+
+    migrate_canonical(), migrate_content_lifecycle(), and
+    resolve_all_relationship_refs() are MAINTENANCE operations and must be
+    invoked explicitly via:
+
+        python backend/maintenance.py [all | canonical | lifecycle | resolve_refs]
+
+    They are intentionally NOT run here to avoid:
+    - ~15 s startup overhead under DB_BACKEND=supabase
+    - accidental re-execution on every process restart
+    - unexpected schema mutations during rolling deploys
+    """
     await repo.setup_indexes()
     await seed_content()
-    await migrate_canonical()
-    await migrate_content_lifecycle(repo)
-    await resolve_all_relationship_refs(repo)
 
 
 app.include_router(api)
