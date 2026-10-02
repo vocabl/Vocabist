@@ -59,23 +59,30 @@ def _imports():
 
 
 COMMANDS = {
-    "canonical":    "migrate_canonical()    — upgrade all words to canonical schema v1",
-    "lifecycle":    "migrate_content_lifecycle() — standardise provenance + lifecycle_version",
-    "resolve_refs": "resolve_all_relationship_refs() — resolve relation headword→id pointers",
-    "all":          "run canonical → lifecycle → resolve_refs in sequence",
+    "canonical":      "migrate_canonical()    — upgrade all words to canonical schema v1",
+    "lifecycle":      "migrate_content_lifecycle() — standardise provenance + lifecycle_version",
+    "resolve_refs":   "resolve_all_relationship_refs() — resolve relation headword→id pointers",
+    "all":            "run canonical → lifecycle → resolve_refs in sequence",
+    "reconcile":      "reconcile_and_sync — compare Mongo vs Supabase; sync missing records",
+    "inspect_outbox": "show unresolved dual-write outbox entries",
+    "retry_outbox":   "retry failed Supabase mirror writes from the outbox",
 }
 
 HELP = f"""
 Vocabist Maintenance CLI
 ========================
 Available commands:
-""" + "\n".join(f"  {k:<14} {v}" for k, v in COMMANDS.items()) + """
+""" + "\n".join(f"  {k:<16} {v}" for k, v in COMMANDS.items()) + """
 
 Environment:
-  DB_BACKEND    mongo (default) | supabase
+  DB_BACKEND    mongo (default) | supabase | dual
+  DUAL_WRITE_ENABLED  true | false (default)
 
-Example:
+Examples:
   DB_BACKEND=supabase python maintenance.py all
+  python maintenance.py reconcile
+  python maintenance.py inspect_outbox
+  python maintenance.py retry_outbox
 """
 
 
@@ -102,6 +109,36 @@ async def run(cmd: str) -> None:
         print("[maintenance] Running resolve_all_relationship_refs() …")
         stats = await resolve_all_relationship_refs(repo)
         print(f"[maintenance] resolve_all_relationship_refs() → {stats} in {time.perf_counter()-t:.1f}s")
+
+    if cmd == "reconcile":
+        t = time.perf_counter()
+        print("[maintenance] Running reconcile_and_sync (Mongo → Supabase) …")
+        import sys as _sys
+        _sys.path.insert(0, _BACKEND_DIR)
+        from migrations.reconcile_and_sync import run as reconcile_run, MIGRATION_ORDER
+        await reconcile_run(MIGRATION_ORDER, dry_run=False, report_only=False)
+        print(f"[maintenance] reconcile_and_sync done in {time.perf_counter()-t:.1f}s")
+
+    if cmd == "inspect_outbox":
+        print("[maintenance] Inspecting dual_write_outbox …")
+        from db.dual_write_repo import DualWriteRepository
+        dw = DualWriteRepository()
+        docs = await dw.get_outbox_unresolved()
+        if not docs:
+            print("[maintenance] No unresolved outbox entries.")
+        else:
+            print(f"[maintenance] {len(docs)} unresolved entries:")
+            for d in docs:
+                print(f"  [{d['collection']}] {d['operation']} pk={d['pk_value']}"
+                      f" retries={d['retry_count']} error={d['error'][:80]}")
+
+    if cmd == "retry_outbox":
+        print("[maintenance] Retrying failed Supabase mirror writes …")
+        from db.dual_write_repo import DualWriteRepository
+        dw = DualWriteRepository()
+        result = await dw.retry_outbox()
+        print(f"[maintenance] Outbox retry: resolved={result['resolved']}"
+              f" failed={result['failed']} total={result['total']}")
 
 
 def main() -> None:

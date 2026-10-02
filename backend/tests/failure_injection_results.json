@@ -1,0 +1,60 @@
+{
+  "backend": "dual",
+  "test_type": "failure_injection",
+  "passed": 10,
+  "failed": 0,
+  "total": 10,
+  "timestamp": "2026-10-02T13:54:31.680262+00:00",
+  "results": [
+    {
+      "name": "Case A: Mongo+Supabase succeed \u2192 no new outbox",
+      "status": "PASS",
+      "note": "mongo=True supabase=True outbox_delta=0"
+    },
+    {
+      "name": "Case B: Mongo OK + Supabase FAIL \u2192 Mongo persists, outbox recorded",
+      "status": "PASS",
+      "note": "mongo_ok=True mongo_has_user=True new_outbox=1"
+    },
+    {
+      "name": "Case C: Mongo FAIL \u2192 op fails; Supabase NOT written",
+      "status": "PASS",
+      "note": "mongo_raised=True supabase_not_written=True"
+    },
+    {
+      "name": "Case D: Outbox retry succeeds \u2192 entry resolved",
+      "status": "PASS",
+      "note": "resolved=True retry_stats={'resolved': 1, 'failed': 0, 'total': 1}"
+    },
+    {
+      "name": "Case E: save_word \u00d7 2 \u2192 1 record each in Mongo & Supabase",
+      "status": "PASS",
+      "note": "mongo_count=1 supabase_count=1"
+    },
+    {
+      "name": "Case F: Restart recovery via outbox replay",
+      "status": "PASS",
+      "note": "pre_unresolved=True sb_recovered=True resolved=True"
+    },
+    {
+      "name": "Idempotency: upsert_word_progress \u00d7 3 \u2192 1 record in Supabase",
+      "status": "PASS",
+      "note": "supabase_count=1"
+    },
+    {
+      "name": "XP increment: Mongo=125, Supabase=125",
+      "status": "PASS",
+      "note": "mongo_xp=125 supabase_xp=125"
+    },
+    {
+      "name": "Write-path audit: all key mutations explicitly overridden",
+      "status": "PASS",
+      "note": "missing=none"
+    },
+    {
+      "name": "Outbox inspect/drain: no exception",
+      "status": "PASS",
+      "note": "unresolved=19 retry={'resolved': 0, 'failed': 0, 'total': 0}"
+    }
+  ]
+}

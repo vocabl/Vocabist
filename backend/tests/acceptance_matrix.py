@@ -659,10 +659,18 @@ def run_matrix(backend: str) -> None:
         d = r.json()
         assert d.get("service") == "vocabist"
         # Verify the env var is what we expect
+        # Note: "dual" mode runs against either dual-write or supabase env var
         current_backend = os.environ.get("DB_BACKEND", "mongo")
-        assert current_backend == backend, \
-            f"test backend={backend} but env DB_BACKEND={current_backend}"
-        return True, f"backend selector active: DB_BACKEND={backend}"
+        if backend == "dual":
+            # Dual-write: accept DB_BACKEND=dual (requires DUAL_WRITE_ENABLED=true)
+            assert current_backend in ("dual",), \
+                f"expected DB_BACKEND=dual, got {current_backend}"
+            dual_enabled = os.environ.get("DUAL_WRITE_ENABLED", "false").lower() == "true"
+            assert dual_enabled, "DUAL_WRITE_ENABLED must be true for dual-write mode"
+        else:
+            assert current_backend == backend, \
+                f"test backend={backend} but env DB_BACKEND={current_backend}"
+        return True, f"backend selector active: DB_BACKEND={current_backend}"
     check(49, "backend selector/startup isolation", c49)
 
     def c50():
@@ -703,8 +711,8 @@ def print_summary(backend: str) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     backend_arg = sys.argv[1] if len(sys.argv) > 1 else "mongo"
-    if backend_arg not in ("mongo", "supabase"):
-        print(f"Usage: python acceptance_matrix.py [mongo|supabase]")
+    if backend_arg not in ("mongo", "supabase", "dual"):
+        print(f"Usage: python acceptance_matrix.py [mongo|supabase|dual]")
         sys.exit(1)
 
     run_matrix(backend_arg)
