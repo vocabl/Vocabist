@@ -3,7 +3,7 @@ import { View, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { makeStyles, useTheme } from '@/src/theme';
 import { AppText } from '@/src/components/AppText';
 import { Button } from '@/src/components/Button';
@@ -147,9 +147,31 @@ export default function WordDetail() {
               ) : null}
             </View>
             {d?.progress ? (
-              <View style={styles.statusPill}>
-                <Icon name="progress-check" size={14} color={colors.brand} />
-                <AppText size={12} weight="medium" color={colors.brand}>{d.progress.status} · {Math.round(d.progress.mastery_score)}% mastery</AppText>
+              <View style={styles.masteryWrap}>
+                <View style={styles.statusPill}>
+                  <Icon name="progress-check" size={14} color={colors.brand} />
+                  <AppText size={12} weight="medium" color={colors.brand}>
+                    {d.progress.status} · {Math.round(d.progress.mastery_score)}% mastery
+                  </AppText>
+                </View>
+                <View
+                  style={styles.masteryTrack}
+                  accessibilityRole="progressbar"
+                  accessibilityValue={{
+                    min: 0,
+                    max: 100,
+                    now: Math.round(d.progress.mastery_score),
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.masteryFill,
+                      {
+                        width: `${Math.min(100, Math.max(2, Math.round(d.progress.mastery_score)))}%`,
+                      },
+                    ]}
+                  />
+                </View>
               </View>
             ) : null}
           </Animated.View>
@@ -195,31 +217,35 @@ export default function WordDetail() {
           {d?.graph.antonyms.length ? <Section title="Antonyms"><WordChips items={d.graph.antonyms} /></Section> : null}
           {d?.graph.related.length ? <Section title="Related words"><WordChips items={d.graph.related} /></Section> : null}
 
-          {(w.word_family?.length || w.roots?.length) ? (
-            <Section title="Word building">
-              {w.word_family?.length ? <MetaLine label="Family" value={w.word_family.join(', ')} /> : null}
-              {w.roots?.length ? <MetaLine label="Roots" value={w.roots.join(', ')} /> : null}
-              {w.prefixes?.length ? <MetaLine label="Prefixes" value={w.prefixes.join(', ')} /> : null}
-              {w.suffixes?.length ? <MetaLine label="Suffixes" value={w.suffixes.join(', ')} /> : null}
-            </Section>
-          ) : null}
+          {(w.word_family?.length || w.roots?.length || w.mnemonic || w.common_mistakes) ? (
+            <ExpandableGroup title="More about this word" testID="more-about-word">
+              {(w.word_family?.length || w.roots?.length) ? (
+                <SubSection title="Word building">
+                  {w.word_family?.length ? <MetaLine label="Family" value={w.word_family.join(', ')} /> : null}
+                  {w.roots?.length ? <MetaLine label="Roots" value={w.roots.join(', ')} /> : null}
+                  {w.prefixes?.length ? <MetaLine label="Prefixes" value={w.prefixes.join(', ')} /> : null}
+                  {w.suffixes?.length ? <MetaLine label="Suffixes" value={w.suffixes.join(', ')} /> : null}
+                </SubSection>
+              ) : null}
 
-          {w.mnemonic ? (
-            <Section title="Memory hook">
-              <View style={styles.mnemonic}>
-                <Icon name="lightbulb-on-outline" size={20} color={colors.warning} />
-                <AppText size={15} style={{ flex: 1, lineHeight: 22 }}>{w.mnemonic}</AppText>
-              </View>
-            </Section>
-          ) : null}
+              {w.mnemonic ? (
+                <SubSection title="Memory hook">
+                  <View style={styles.mnemonic}>
+                    <Icon name="lightbulb-on-outline" size={20} color={colors.warning} />
+                    <AppText size={15} style={{ flex: 1, lineHeight: 22 }}>{w.mnemonic}</AppText>
+                  </View>
+                </SubSection>
+              ) : null}
 
-          {w.common_mistakes ? (
-            <Section title="Common mistake">
-              <View style={styles.mistake}>
-                <Icon name="alert-outline" size={20} color={colors.error} />
-                <AppText size={15} color={colors.onSurfaceTertiary} style={{ flex: 1, lineHeight: 22 }}>{w.common_mistakes}</AppText>
-              </View>
-            </Section>
+              {w.common_mistakes ? (
+                <SubSection title="Common mistake">
+                  <View style={styles.mistake}>
+                    <Icon name="alert-outline" size={20} color={colors.error} />
+                    <AppText size={15} color={colors.onSurfaceTertiary} style={{ flex: 1, lineHeight: 22 }}>{w.common_mistakes}</AppText>
+                  </View>
+                </SubSection>
+              ) : null}
+            </ExpandableGroup>
           ) : null}
 
           {d?.exams.length ? (
@@ -259,6 +285,51 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function ExpandableGroup({
+  title,
+  children,
+  testID,
+}: {
+  title: string;
+  children: React.ReactNode;
+  testID?: string;
+}) {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <Animated.View layout={LinearTransition.duration(220)} style={styles.expandable}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={title}
+        style={styles.expandableHead}
+        hitSlop={6}
+      >
+        <AppText size={13} weight="medium" color={colors.muted} style={styles.expandableTitle}>
+          {title.toUpperCase()}
+        </AppText>
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={20} color={colors.muted} />
+      </Pressable>
+      {open ? <View style={{ marginTop: 10 }}>{children}</View> : null}
+    </Animated.View>
+  );
+}
+
+function SubSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ marginBottom: 14 }}>
+      <AppText size={12} weight="medium" color={colors.onSurfaceTertiary} style={{ marginBottom: 6 }}>
+        {title}
+      </AppText>
+      {children}
+    </View>
+  );
+}
+
 function MetaLine({ label, value }: { label: string; value: string }) {
   const { colors } = useTheme();
   return (
@@ -275,8 +346,26 @@ const useStyles = makeStyles((t) => ({
   loading: { padding: t.spacing.xl, gap: t.spacing.md },
   body: { paddingHorizontal: t.spacing.xl, paddingTop: t.spacing.sm },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.brandTertiary, alignSelf: 'flex-start', paddingHorizontal: t.spacing.md, paddingVertical: 6, borderRadius: t.radius.pill, marginTop: t.spacing.md },
+  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.brandTertiary, alignSelf: 'flex-start', paddingHorizontal: t.spacing.md, paddingVertical: 6, borderRadius: t.radius.pill },
+  masteryWrap: { marginTop: t.spacing.md, gap: t.spacing.sm },
+  masteryTrack: { height: 6, borderRadius: 3, backgroundColor: t.colors.surfaceTertiary, overflow: 'hidden' },
+  masteryFill: { height: '100%', backgroundColor: t.colors.brand, borderRadius: 3 },
   section: { marginTop: t.spacing.xl },
+  expandable: {
+    marginTop: t.spacing.xl,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceSecondary,
+    borderRadius: t.radius.md,
+    padding: t.spacing.lg,
+  },
+  expandableHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 32,
+  },
+  expandableTitle: { letterSpacing: 0.5 },
   sectionTitle: { marginBottom: t.spacing.sm, letterSpacing: 0.5 },
   quote: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: t.colors.surfaceTertiary, borderRadius: t.radius.md, padding: t.spacing.lg },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm },

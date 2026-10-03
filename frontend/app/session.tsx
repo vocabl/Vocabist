@@ -46,6 +46,11 @@ export default function Session() {
   const [xpGain, setXpGain] = useState(0);
   const [stats, setStats] = useState({ answered: 0, correct: 0 });
   const [done, setDone] = useState(false);
+  const [lastAnswer, setLastAnswer] = useState<{
+    mastery_score?: number;
+    status?: string;
+    just_mastered?: boolean;
+  } | null>(null);
   const startedAt = useRef(Date.now());
   const sessionStart = useRef(Date.now());
 
@@ -65,15 +70,26 @@ export default function Session() {
     setIsCorrect(correct);
     setPhase('feedback');
     setStats((s) => ({ answered: s.answered + 1, correct: s.correct + (correct ? 1 : 0) }));
+    setLastAnswer(null);
     if (Platform.OS !== 'web') {
       Haptics.notificationAsync(correct ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error).catch(() => {});
     }
     try {
-      const res = await api<{ xp_gain: number }>('/practice/answer', {
+      const res = await api<{
+        xp_gain: number;
+        mastery_score: number;
+        status: string;
+        just_mastered: boolean;
+      }>('/practice/answer', {
         method: 'POST',
         body: { word_id: q.word_id, mode: q.mode, correct, response_time_ms: Date.now() - startedAt.current },
       });
       setXpGain(res.xp_gain);
+      setLastAnswer({
+        mastery_score: res.mastery_score,
+        status: res.status,
+        just_mastered: res.just_mastered,
+      });
     } catch { /* ignore */ }
   };
 
@@ -89,6 +105,8 @@ export default function Session() {
       qc.invalidateQueries({ queryKey: ['progress'] });
       qc.invalidateQueries({ queryKey: ['exams'] });
       qc.invalidateQueries({ queryKey: ['slipping'] });
+      qc.invalidateQueries({ queryKey: ['words'] });
+      qc.invalidateQueries({ queryKey: ['saved'] });
       setDone(true);
       return;
     }
@@ -96,6 +114,7 @@ export default function Session() {
     setSelected(null);
     setTyped('');
     setXpGain(0);
+    setLastAnswer(null);
     setPhase('teach');
   };
 
@@ -229,8 +248,54 @@ export default function Session() {
               <AppText weight="semibold" size={17} color={isCorrect ? colors.success : colors.error}>
                 {isCorrect ? `Correct! +${xpGain} XP` : 'Not quite'}
               </AppText>
+              {lastAnswer?.just_mastered ? (
+                <View style={styles.masteredPill}>
+                  <Icon name="check-decagram" size={12} color={colors.onBrand} />
+                  <AppText size={11} weight="semibold" color={colors.onBrand}>MASTERED</AppText>
+                </View>
+              ) : null}
             </View>
-            {!isCorrect ? <AppText size={14} color={colors.onSurfaceTertiary} style={{ marginTop: 4 }}>Answer: {q.answer}</AppText> : null}
+            {!isCorrect ? (
+              <AppText size={14} color={colors.onSurfaceTertiary} style={{ marginTop: 4 }}>
+                Answer: <AppText size={14} weight="medium" color={colors.onSurface}>{q.answer}</AppText>
+              </AppText>
+            ) : null}
+            {q?.card?.simple_definition ? (
+              <AppText size={13} color={colors.muted} numberOfLines={2} style={{ marginTop: 4, lineHeight: 19 }}>
+                <AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>{q.card.headword}</AppText>
+                {' — '}{q.card.simple_definition}
+              </AppText>
+            ) : null}
+            {lastAnswer?.mastery_score != null ? (
+              <View
+                style={styles.masteryRow}
+                accessibilityRole="progressbar"
+                accessibilityLabel="Mastery"
+                accessibilityValue={{
+                  min: 0,
+                  max: 100,
+                  now: Math.round(lastAnswer.mastery_score),
+                }}
+              >
+                <AppText size={12} weight="medium" color={colors.onSurfaceTertiary} style={{ minWidth: 64 }}>
+                  Mastery
+                </AppText>
+                <View style={styles.masteryTrack}>
+                  <View
+                    style={[
+                      styles.masteryFill,
+                      {
+                        width: `${Math.min(100, Math.max(2, Math.round(lastAnswer.mastery_score)))}%`,
+                        backgroundColor: isCorrect ? colors.success : colors.warning,
+                      },
+                    ]}
+                  />
+                </View>
+                <AppText size={12} weight="medium" color={colors.onSurfaceTertiary}>
+                  {Math.round(lastAnswer.mastery_score)}%
+                </AppText>
+              </View>
+            ) : null}
           </Animated.View>
         ) : null}
 
@@ -247,13 +312,23 @@ export default function Session() {
 }
 
 function modeLabel(mode: string) {
-  return {
-    multiple_choice: 'Choose the meaning',
-    synonym_select: 'Pick the synonym',
-    true_false: 'True or false',
-    spelling: 'Spell it',
-    fill_blank: 'Fill the blank',
-  }[mode] ?? 'Question';
+  return (
+    ({
+      multiple_choice: 'Choose the meaning',
+      synonym_select: 'Pick the synonym',
+      antonym_select: 'Pick the opposite',
+      true_false: 'True or false',
+      spelling: 'Spell it',
+      fill_blank: 'Fill the blank',
+      definition_recall: 'Recall the meaning',
+      sentence_completion: 'Complete the sentence',
+      context_choice: 'Which fits best?',
+      word_usage: 'How is it used?',
+      confusing_words: 'Spot the right one',
+      word_family: 'Word family',
+      mixed_adaptive: 'Mixed practice',
+    } as Record<string, string>)[mode] ?? 'Question'
+  );
 }
 
 const useStyles = makeStyles((t) => ({
@@ -276,8 +351,27 @@ const useStyles = makeStyles((t) => ({
   banner: { paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.lg, borderTopWidth: 1, borderTopColor: t.colors.divider, backgroundColor: t.colors.surface },
   bannerCorrect: { backgroundColor: '#EEF6F0', borderTopColor: '#D5E8DC' },
   bannerWrong: { backgroundColor: '#FBF0F0', borderTopColor: '#EFD9D9' },
-  feedback: { marginBottom: t.spacing.md },
+  feedback: { marginBottom: t.spacing.md, gap: 2 },
   feedbackRow: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm },
+  masteredPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: t.colors.brand,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: t.radius.pill,
+    marginLeft: 'auto',
+  },
+  masteryRow: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: t.spacing.sm, marginTop: 10,
+  },
+  masteryTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: t.colors.surfaceTertiary,
+    overflow: 'hidden',
+  },
+  masteryFill: { height: '100%', borderRadius: 3 },
   summary: { flex: 1, backgroundColor: t.colors.surface, paddingHorizontal: t.spacing.xl, justifyContent: 'space-between' },
   summaryInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   summaryIcon: { width: 88, height: 88, borderRadius: 44, backgroundColor: t.colors.brandTertiary, alignItems: 'center', justifyContent: 'center' },

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
+import { View, ScrollView, Pressable, RefreshControl, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +17,8 @@ import { useAuth } from '@/src/auth/AuthContext';
 import { api } from '@/src/api/client';
 
 const HERO_BG = 'https://images.unsplash.com/photo-1619252584172-a83a949b6efd?crop=entropy&cs=srgb&fm=jpg&w=900&q=80';
+// BlurView on Android/web is expensive and inconsistent — iOS only, soft wash elsewhere.
+const USE_BLUR = Platform.OS === 'ios';
 
 type Mission = {
   total_words: number; review_count: number; new_count: number; estimated_minutes: number;
@@ -66,7 +68,7 @@ export default function Home() {
       <AppText size={15} color={colors.muted}>{greeting()},</AppText>
       <AppText weight="semibold" size={28} style={styles.name}>{firstName}</AppText>
 
-      {/* Mission hero */}
+      {/* Mission hero — big only when there's actual work */}
       {missionQ.isLoading ? (
         <Skeleton height={200} rounded={20} style={{ marginTop: 8 }} />
       ) : missionQ.isError ? (
@@ -74,41 +76,60 @@ export default function Home() {
           <AppText size={15} color={colors.muted} style={{ marginBottom: 12 }}>Couldn't load your mission.</AppText>
           <Button label="Tap to retry" variant="secondary" size="md" onPress={() => missionQ.refetch()} />
         </Card>
-      ) : (
+      ) : m && m.total_words > 0 ? (
         <Animated.View entering={FadeInDown.duration(280)} style={styles.heroWrap} testID="today-mission-card">
           <Image source={HERO_BG} style={styles.heroBg} contentFit="cover" transition={200} />
-          <BlurView intensity={28} tint="light" style={styles.heroBlur}>
-            <View style={styles.heroInner}>
-              <View style={styles.missionTag}>
-                <Icon name="target" size={16} color={colors.brand} />
-                <AppText size={13} weight="medium" color={colors.brand}>Today's Mission</AppText>
+          {USE_BLUR ? (
+            <BlurView intensity={28} tint="light" style={styles.heroBlur}>
+              <View style={styles.heroInner}>
+                <HeroContent m={m} onStart={() => router.push('/session?source=mission')} />
               </View>
-              {m && m.total_words > 0 ? (
-                <>
-                  <AppText weight="semibold" size={26} style={styles.heroTitle}>
-                    {m.total_words} words · {m.estimated_minutes} min
-                  </AppText>
-                  <View style={styles.missionRow}>
-                    {m.review_count > 0 ? (
-                      <View style={styles.missionPill}><Icon name="refresh" size={15} color={colors.onSurfaceTertiary} /><AppText size={13} color={colors.onSurfaceTertiary}>{m.review_count} to review</AppText></View>
-                    ) : null}
-                    {m.new_count > 0 ? (
-                      <View style={styles.missionPill}><Icon name="star-four-points-outline" size={15} color={colors.onSurfaceTertiary} /><AppText size={13} color={colors.onSurfaceTertiary}>{m.new_count} new</AppText></View>
-                    ) : null}
-                  </View>
-                  <Button testID="start-mission-button" label="Start" icon="play" onPress={() => router.push('/session?source=mission')} style={{ marginTop: 16 }} />
-                </>
-              ) : (
-                <>
-                  <AppText weight="semibold" size={22} style={styles.heroTitle}>You're all caught up</AppText>
-                  <AppText size={14} color={colors.onSurfaceTertiary} style={{ marginBottom: 16 }}>No reviews due right now. Explore new words to keep growing.</AppText>
-                  <Button testID="discover-button" label="Discover words" variant="secondary" onPress={() => router.push('/(tabs)/discover')} />
-                </>
-              )}
+            </BlurView>
+          ) : (
+            <View style={styles.heroInnerFallback}>
+              <HeroContent m={m} onStart={() => router.push('/session?source=mission')} />
             </View>
-          </BlurView>
+          )}
+        </Animated.View>
+      ) : (
+        // Compact caught-up state — not a dominant hero
+        <Animated.View entering={FadeInDown.duration(240)}>
+          <Card style={styles.caughtUpCard} testID="today-mission-card">
+            <View style={styles.caughtUpIcon}>
+              <Icon name="check-all" size={22} color={colors.success} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppText weight="medium" size={17}>You're all caught up</AppText>
+              <AppText size={14} color={colors.muted} style={{ marginTop: 2 }}>
+                No reviews due. Discover new words to keep growing.
+              </AppText>
+            </View>
+            <Button
+              testID="discover-button"
+              label="Discover"
+              variant="secondary"
+              size="md"
+              onPress={() => router.push('/(tabs)/discover')}
+            />
+          </Card>
         </Animated.View>
       )}
+
+      {/* Smart review nudge — urgency first, above stats */}
+      {slippingQ.data && slippingQ.data.count > 0 ? (
+        <Card style={styles.slipCard} onPress={() => router.push('/session?source=slipping')} testID="slipping-card">
+          <View style={[styles.statIcon, { backgroundColor: '#FBEAEA', marginBottom: 0 }]}>
+            <Icon name="clock-alert-outline" size={20} color={colors.error} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <AppText weight="medium" size={16}>Slipping from memory</AppText>
+            <AppText size={13} color={colors.muted} style={{ marginTop: 2 }}>
+              {slippingQ.data.count} word{slippingQ.data.count === 1 ? '' : 's'} to review before you forget
+            </AppText>
+          </View>
+          <Icon name="chevron-right" size={22} color={colors.muted} />
+        </Card>
+      ) : null}
 
       {/* Stats row */}
       <View style={styles.statsRow}>
@@ -127,22 +148,6 @@ export default function Home() {
           <AppText size={12} color={colors.muted}>XP · Level {p?.level ?? 1}</AppText>
         </Card>
       </View>
-
-      {/* Smart review nudge */}
-      {slippingQ.data && slippingQ.data.count > 0 ? (
-        <Card style={styles.slipCard} onPress={() => router.push('/session?source=slipping')} testID="slipping-card">
-          <View style={[styles.statIcon, { backgroundColor: '#FBEAEA', marginBottom: 0 }]}>
-            <Icon name="clock-alert-outline" size={20} color={colors.error} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <AppText weight="medium" size={16}>Slipping from memory</AppText>
-            <AppText size={13} color={colors.muted} style={{ marginTop: 2 }}>
-              {slippingQ.data.count} word{slippingQ.data.count === 1 ? '' : 's'} to review before you forget
-            </AppText>
-          </View>
-          <Icon name="chevron-right" size={22} color={colors.muted} />
-        </Card>
-      ) : null}
 
       {/* Vocabulary progress */}
       <Card style={styles.progressCard} testID="vocab-progress-card">
@@ -198,6 +203,43 @@ export default function Home() {
   );
 }
 
+function HeroContent({ m, onStart }: { m: Mission; onStart: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <>
+      <View style={styles.missionTag}>
+        <Icon name="target" size={16} color={colors.brand} />
+        <AppText size={13} weight="medium" color={colors.brand}>Today's Mission</AppText>
+      </View>
+      <AppText weight="semibold" size={26} style={styles.heroTitle}>
+        {m.total_words} words · {m.estimated_minutes} min
+      </AppText>
+      <View style={styles.missionRow}>
+        {m.review_count > 0 ? (
+          <View style={styles.missionPill}>
+            <Icon name="refresh" size={15} color={colors.onSurfaceTertiary} />
+            <AppText size={13} color={colors.onSurfaceTertiary}>{m.review_count} to review</AppText>
+          </View>
+        ) : null}
+        {m.new_count > 0 ? (
+          <View style={styles.missionPill}>
+            <Icon name="star-four-points-outline" size={15} color={colors.onSurfaceTertiary} />
+            <AppText size={13} color={colors.onSurfaceTertiary}>{m.new_count} new</AppText>
+          </View>
+        ) : null}
+      </View>
+      <Button
+        testID="start-mission-button"
+        label="Start"
+        icon="play"
+        onPress={onStart}
+        style={{ marginTop: 16 }}
+      />
+    </>
+  );
+}
+
 const useStyles = makeStyles((t) => ({
   container: { flex: 1, backgroundColor: t.colors.surface },
   content: { paddingHorizontal: t.spacing.lg, gap: t.spacing.md },
@@ -206,6 +248,13 @@ const useStyles = makeStyles((t) => ({
   heroBg: { ...({ position: 'absolute' } as any), width: '100%', height: '100%' },
   heroBlur: { padding: 2 },
   heroInner: { padding: t.spacing.xl, backgroundColor: 'rgba(253,253,251,0.55)', borderRadius: t.radius.lg },
+  heroInnerFallback: { padding: t.spacing.xl, backgroundColor: 'rgba(253,253,251,0.82)', borderRadius: t.radius.lg },
+  caughtUpCard: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md },
+  caughtUpIcon: {
+    width: 44, height: 44, borderRadius: t.radius.md,
+    backgroundColor: '#E8F2EC',
+    alignItems: 'center', justifyContent: 'center',
+  },
   missionTag: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: t.spacing.md },
   heroTitle: { marginBottom: t.spacing.md },
   missionRow: { flexDirection: 'row', gap: t.spacing.sm, flexWrap: 'wrap' },
