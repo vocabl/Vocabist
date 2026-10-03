@@ -82,12 +82,12 @@ export default function Home() {
           {USE_BLUR ? (
             <BlurView intensity={28} tint="light" style={styles.heroBlur}>
               <View style={styles.heroInner}>
-                <HeroContent m={m} onStart={() => router.push('/session?source=mission')} />
+                <HeroContent m={m} onStart={() => router.push('/mission')} />
               </View>
             </BlurView>
           ) : (
             <View style={styles.heroInnerFallback}>
-              <HeroContent m={m} onStart={() => router.push('/session?source=mission')} />
+              <HeroContent m={m} onStart={() => router.push('/mission')} />
             </View>
           )}
         </Animated.View>
@@ -203,6 +203,16 @@ export default function Home() {
   );
 }
 
+function missionHeadline(m: Mission): string {
+  if (m.total_words === 0) return "You're on track";
+  if (m.review_count > 0 && m.new_count === 0) return 'Your review is ready';
+  if (m.new_count > 0 && m.review_count === 0) return `Learn ${m.new_count} new word${m.new_count === 1 ? '' : 's'}`;
+  // mix of both
+  if (m.review_count >= m.new_count * 2) return 'Review focus today';
+  if (m.new_count >= m.review_count * 2) return 'New words today';
+  return 'Balanced practice';
+}
+
 function HeroContent({ m, onStart }: { m: Mission; onStart: () => void }) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -210,7 +220,7 @@ function HeroContent({ m, onStart }: { m: Mission; onStart: () => void }) {
     <>
       <View style={styles.missionTag}>
         <Icon name="target" size={16} color={colors.brand} />
-        <AppText size={13} weight="medium" color={colors.brand}>Today's Mission</AppText>
+        <AppText size={13} weight="medium" color={colors.brand}>Today's Mission · {missionHeadline(m)}</AppText>
       </View>
       <AppText weight="semibold" size={26} style={styles.heroTitle}>
         {m.total_words} words · {m.estimated_minutes} min
@@ -231,8 +241,8 @@ function HeroContent({ m, onStart }: { m: Mission; onStart: () => void }) {
       </View>
       <Button
         testID="start-mission-button"
-        label="Start"
-        icon="play"
+        label="See today's plan"
+        icon="arrow-right"
         onPress={onStart}
         style={{ marginTop: 16 }}
       />

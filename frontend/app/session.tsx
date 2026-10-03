@@ -51,8 +51,22 @@ export default function Session() {
     status?: string;
     just_mastered?: boolean;
   } | null>(null);
+  const [missedIds, setMissedIds] = useState<string[]>([]);
+  const [masteredCount, setMasteredCount] = useState(0);
   const startedAt = useRef(Date.now());
   const sessionStart = useRef(Date.now());
+
+  // Pre-fetch slipping word IDs so we can give each question honest context
+  // ("Let's strengthen this one") WITHOUT fabricating a status client-side.
+  const slippingQ = useQuery({
+    queryKey: ['slipping'],
+    queryFn: () => api<{ count: number; words: { id: string }[] }>('/review/slipping'),
+    staleTime: 60_000,
+  });
+  const slippingSet = React.useMemo(
+    () => new Set((slippingQ.data?.words ?? []).map((w) => w.id)),
+    [slippingQ.data],
+  );
 
   const q = questions[index];
   const showTeach = phase === 'teach' && q?.teach;
@@ -90,7 +104,11 @@ export default function Session() {
         status: res.status,
         just_mastered: res.just_mastered,
       });
+      if (res.just_mastered) setMasteredCount((c) => c + 1);
     } catch { /* ignore */ }
+    if (!correct) {
+      setMissedIds((ids) => (ids.includes(q.word_id) ? ids : [...ids, q.word_id]));
+    }
   };
 
   const nextQuestion = async () => {
@@ -125,25 +143,99 @@ export default function Session() {
 
   if (done || questions.length === 0) {
     const pct = stats.answered ? Math.round((stats.correct / stats.answered) * 100) : 0;
+    const xpEarned = stats.correct * 10 + (stats.answered - stats.correct) * 2;
+
+    // Adaptive "next action" — chosen from real signals only, never fabricated.
+    const missedCsv = missedIds.join(',');
+    const hasMissed = missedIds.length > 0;
+    const sourceWasSlipping = String(source) === 'slipping';
+    const nextActions: { label: string; icon: React.ComponentProps<typeof Icon>['name']; onPress: () => void; testID: string }[] = [];
+    if (hasMissed) {
+      nextActions.push({
+        testID: 'completion-practise-missed',
+        label: `Practise ${missedIds.length} missed`,
+        icon: 'refresh',
+        onPress: () => router.replace(`/session?source=list&ref=${missedCsv}`),
+      });
+    } else if (sourceWasSlipping) {
+      nextActions.push({
+        testID: 'completion-discover',
+        label: 'Discover new words',
+        icon: 'compass-outline',
+        onPress: () => router.replace('/(tabs)/discover'),
+      });
+    } else {
+      // Clean session with no misses — point to the remaining review backlog
+      // if any (count already in cache), else discovery.
+      nextActions.push({
+        testID: 'completion-open-review',
+        label: 'Open Review',
+        icon: 'clock-outline',
+        onPress: () => router.replace('/review'),
+      });
+    }
+
     return (
       <View style={[styles.summary, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}>
         <Animated.View entering={FadeInUp} style={styles.summaryInner}>
-          <View style={styles.summaryIcon}><Icon name={questions.length === 0 ? 'check-all' : 'trophy'} size={40} color={colors.brand} /></View>
-          <AppText weight="semibold" size={26} style={{ marginTop: 20 }}>{questions.length === 0 ? 'All caught up!' : 'Session complete'}</AppText>
+          <View style={styles.summaryIcon}>
+            <Icon name={questions.length === 0 ? 'check-all' : 'trophy'} size={40} color={colors.brand} />
+          </View>
+          <AppText weight="semibold" size={26} style={{ marginTop: 20, textAlign: 'center' }}>
+            {questions.length === 0
+              ? 'All caught up!'
+              : masteredCount > 0
+              ? `${masteredCount} mastered`
+              : 'Session complete'}
+          </AppText>
           {questions.length === 0 ? (
-            <AppText size={15} color={colors.muted} style={styles.summarySub}>Nothing to practice here right now.</AppText>
+            <AppText size={15} color={colors.muted} style={styles.summarySub}>Nothing to practise here right now.</AppText>
           ) : (
             <>
-              <AppText size={15} color={colors.muted} style={styles.summarySub}>You answered {stats.correct} of {stats.answered} correctly.</AppText>
+              <AppText size={15} color={colors.muted} style={styles.summarySub}>
+                You answered {stats.correct} of {stats.answered} correctly.
+                {masteredCount > 0 ? ` New word${masteredCount === 1 ? '' : 's'} mastered today.` : ''}
+              </AppText>
               <View style={styles.summaryStats}>
-                <View style={styles.sStat}><AppText weight="semibold" size={24} color={colors.brand}>{pct}%</AppText><AppText size={12} color={colors.muted}>accuracy</AppText></View>
+                <View style={styles.sStat}>
+                  <AppText weight="semibold" size={24} color={colors.brand}>{pct}%</AppText>
+                  <AppText size={12} color={colors.muted}>accuracy</AppText>
+                </View>
                 <View style={styles.sDivider} />
-                <View style={styles.sStat}><AppText weight="semibold" size={24} color={colors.warning}>+{stats.correct * 10 + (stats.answered - stats.correct) * 2}</AppText><AppText size={12} color={colors.muted}>XP earned</AppText></View>
+                <View style={styles.sStat}>
+                  <AppText weight="semibold" size={24} color={colors.warning}>+{xpEarned}</AppText>
+                  <AppText size={12} color={colors.muted}>XP earned</AppText>
+                </View>
+                {masteredCount > 0 ? (
+                  <>
+                    <View style={styles.sDivider} />
+                    <View style={styles.sStat}>
+                      <AppText weight="semibold" size={24} color={colors.success}>{masteredCount}</AppText>
+                      <AppText size={12} color={colors.muted}>mastered</AppText>
+                    </View>
+                  </>
+                ) : null}
               </View>
             </>
           )}
         </Animated.View>
-        <Button testID="session-done-button" label="Done" onPress={() => router.replace('/(tabs)/home')} />
+        <View style={{ gap: 10 }}>
+          {nextActions.map((a) => (
+            <Button
+              key={a.testID}
+              testID={a.testID}
+              label={a.label}
+              icon={a.icon}
+              onPress={a.onPress}
+            />
+          ))}
+          <Button
+            testID="session-done-button"
+            label="Done"
+            variant="ghost"
+            onPress={() => router.replace('/(tabs)/home')}
+          />
+        </View>
       </View>
     );
   }
@@ -185,6 +277,24 @@ export default function Session() {
           </Animated.View>
         ) : (
           <Animated.View key={`q-${index}`} entering={SlideInRight.duration(220)}>
+            {/* Adaptive context header — real signal, no fabrication */}
+            <View style={styles.contextRow}>
+              {slippingSet.has(q.word_id) ? (
+                <>
+                  <Icon name="clock-alert-outline" size={14} color={colors.warning} />
+                  <AppText size={12} weight="medium" color={colors.warning} style={styles.contextText}>
+                    LET&apos;S STRENGTHEN THIS ONE
+                  </AppText>
+                </>
+              ) : (
+                <>
+                  <Icon name="refresh" size={14} color={colors.onSurfaceTertiary} />
+                  <AppText size={12} weight="medium" color={colors.onSurfaceTertiary} style={styles.contextText}>
+                    REVIEW
+                  </AppText>
+                </>
+              )}
+            </View>
             <AppText size={13} weight="medium" color={colors.muted} style={{ marginBottom: 8 }}>{modeLabel(q.mode)}</AppText>
             <AppText weight="medium" size={22} style={styles.prompt}>{q.prompt}</AppText>
 
@@ -343,6 +453,11 @@ const useStyles = makeStyles((t) => ({
   teachDef: { marginTop: t.spacing.lg },
   exampleBox: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: t.colors.surfaceTertiary, borderRadius: t.radius.md, padding: t.spacing.lg, marginTop: t.spacing.lg },
   prompt: { marginBottom: t.spacing.xl, lineHeight: 30 },
+  contextRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginBottom: t.spacing.sm,
+  },
+  contextText: { letterSpacing: 0.5 },
   opt: { flexDirection: 'row', alignItems: 'center', backgroundColor: t.colors.surfaceSecondary, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.border, paddingVertical: t.spacing.lg, paddingHorizontal: t.spacing.lg, minHeight: 56 },
   optSelected: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTertiary },
   optCorrect: { borderColor: t.colors.success, backgroundColor: '#E8F2EC' },
