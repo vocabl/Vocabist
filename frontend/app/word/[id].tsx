@@ -266,7 +266,13 @@ export default function WordDetail() {
       {/* sticky CTA */}
       {w ? (
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
-          <Button label="Practice" icon="play" style={{ flex: 1 }} onPress={() => router.push(`/session?source=word&ref=${w.id}`)} testID="word-practice-button" />
+          <Button
+            label={d?.progress?.status === 'MASTERED' ? 'Keep it fresh' : 'Practice'}
+            icon="play"
+            style={{ flex: 1 }}
+            onPress={() => router.push(`/session?source=word&ref=${w.id}`)}
+            testID="word-practice-button"
+          />
           <Button label={d?.saved ? 'Saved' : 'Save'} variant="secondary" icon={d?.saved ? 'bookmark' : 'bookmark-outline'} style={{ flex: 1 }} onPress={toggleSave} testID="word-save-cta" />
         </View>
       ) : null}
