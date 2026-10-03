@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, ScrollView, Pressable, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
@@ -35,6 +35,15 @@ export default function WordDetail() {
   const q = useQuery({ queryKey: ['word', id], queryFn: () => api<Detail>(`/words/${id}`) });
   const d = q.data;
   const w = d?.word;
+
+  // Re-fetch when the screen regains focus (e.g. after returning from a
+  // practice session). We rely entirely on the server for the new status /
+  // mastery_score; never simulate the transition client-side.
+  useFocusEffect(
+    React.useCallback(() => {
+      qc.invalidateQueries({ queryKey: ['word', id] });
+    }, [id, qc]),
+  );
 
   const [audio, setAudio] = useState<{ us_url?: string | null; uk_url?: string | null; tts_url?: string | null } | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
@@ -88,7 +97,7 @@ export default function WordDetail() {
     } catch { toast.show('Could not update', 'error'); }
   };
 
-  const WordChips = ({ items }: { items: WordRef[] }) => (
+  const WordChips = ({ items, kind }: { items: WordRef[]; kind: string }) => (
     <View style={styles.chipWrap}>
       {items.map((it, i) => (
         <Pressable
@@ -96,6 +105,9 @@ export default function WordDetail() {
           onPress={() => it.id ? router.push(`/word/${it.id}`) : router.push(`/(tabs)/discover?q=${encodeURIComponent(it.headword)}`)}
           style={styles.wordChip}
           testID={`related-chip-${it.headword}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${kind} ${it.headword}`}
+          accessibilityHint={it.id ? 'Opens the word detail page' : 'Searches for this word in Discover'}
         >
           <AppText size={14} weight="medium" color={colors.onBrandTertiary}>{it.headword}</AppText>
           <Icon name={it.id ? 'arrow-top-right' : 'magnify'} size={13} color={colors.brandSecondary} />
@@ -107,10 +119,22 @@ export default function WordDetail() {
   return (
     <View style={styles.container}>
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <Pressable testID="word-back-button" onPress={() => router.back()} hitSlop={10}>
+        <Pressable
+          testID="word-back-button"
+          onPress={() => router.back()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
           <Icon name="chevron-left" size={28} color={colors.onSurface} />
         </Pressable>
-        <Pressable testID="word-save-button" onPress={toggleSave} hitSlop={10}>
+        <Pressable
+          testID="word-save-button"
+          onPress={toggleSave}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={d?.saved ? 'Remove word from saved' : 'Save word'}
+        >
           <Icon name={d?.saved ? 'bookmark' : 'bookmark-outline'} size={24} color={d?.saved ? colors.brand : colors.onSurface} />
         </Pressable>
       </View>
@@ -135,15 +159,38 @@ export default function WordDetail() {
             <AppText size={14} color={colors.brandSecondary} weight="medium" style={{ marginTop: 4 }}>{w.part_of_speech}</AppText>
 
             <View style={styles.pronRow}>
-              <Pressable testID="pron-listen" onPress={() => playPron()} style={styles.pronBtn}>
+              <Pressable
+                testID="pron-listen"
+                onPress={() => playPron()}
+                style={styles.pronBtn}
+                accessibilityRole="button"
+                accessibilityLabel={`Listen to the pronunciation of ${w.headword}`}
+                accessibilityState={{ busy: audioLoading }}
+              >
                 {audioLoading ? <ActivityIndicator size="small" color={colors.brand} /> : <Icon name="volume-high" size={18} color={colors.brand} />}
                 <AppText size={14} weight="medium" color={colors.brand}>Listen</AppText>
               </Pressable>
               {audio?.us_url ? (
-                <Pressable testID="pron-us" onPress={() => playPron('us')} style={styles.pronMini}><AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>US</AppText></Pressable>
+                <Pressable
+                  testID="pron-us"
+                  onPress={() => playPron('us')}
+                  style={styles.pronMini}
+                  accessibilityRole="button"
+                  accessibilityLabel="Play US pronunciation"
+                >
+                  <AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>US</AppText>
+                </Pressable>
               ) : null}
               {audio?.uk_url ? (
-                <Pressable testID="pron-uk" onPress={() => playPron('uk')} style={styles.pronMini}><AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>UK</AppText></Pressable>
+                <Pressable
+                  testID="pron-uk"
+                  onPress={() => playPron('uk')}
+                  style={styles.pronMini}
+                  accessibilityRole="button"
+                  accessibilityLabel="Play UK pronunciation"
+                >
+                  <AppText size={13} weight="medium" color={colors.onSurfaceTertiary}>UK</AppText>
+                </Pressable>
               ) : null}
             </View>
             {d?.progress ? (
@@ -151,12 +198,13 @@ export default function WordDetail() {
                 <View style={styles.statusPill}>
                   <Icon name="progress-check" size={14} color={colors.brand} />
                   <AppText size={12} weight="medium" color={colors.brand}>
-                    {d.progress.status} · {Math.round(d.progress.mastery_score)}% mastery
+                    {friendlyStatus(d.progress.status)} · {Math.round(d.progress.mastery_score)}%
                   </AppText>
                 </View>
                 <View
                   style={styles.masteryTrack}
                   accessibilityRole="progressbar"
+                  accessibilityLabel={`Mastery ${Math.round(d.progress.mastery_score)} percent`}
                   accessibilityValue={{
                     min: 0,
                     max: 100,
@@ -213,9 +261,28 @@ export default function WordDetail() {
             )}
           </Section>
 
-          {d?.graph.synonyms.length ? <Section title="Synonyms"><WordChips items={d.graph.synonyms} /></Section> : null}
-          {d?.graph.antonyms.length ? <Section title="Antonyms"><WordChips items={d.graph.antonyms} /></Section> : null}
-          {d?.graph.related.length ? <Section title="Related words"><WordChips items={d.graph.related} /></Section> : null}
+          {d?.graph.synonyms.length ? <Section title="Synonyms"><WordChips items={d.graph.synonyms} kind="synonym" /></Section> : null}
+          {d?.graph.antonyms.length ? <Section title="Antonyms"><WordChips items={d.graph.antonyms} kind="antonym" /></Section> : null}
+          {d?.graph.related.length ? <Section title="Related words"><WordChips items={d.graph.related} kind="related word" /></Section> : null}
+
+          {Array.isArray(w.translations) && w.translations.length > 0 ? (
+            <Section title="Translations">
+              <View style={{ gap: 6 }}>
+                {w.translations.map((t: any, i: number) => (
+                  <View key={`tr-${i}`} style={styles.translationRow}>
+                    {typeof t?.language === 'string' ? (
+                      <AppText size={12} weight="medium" color={colors.onSurfaceTertiary} style={styles.translationLang}>
+                        {t.language.toUpperCase()}
+                      </AppText>
+                    ) : null}
+                    <AppText size={15} style={{ flex: 1, lineHeight: 22 }}>
+                      {typeof t === 'string' ? t : (t?.text ?? '')}
+                    </AppText>
+                  </View>
+                ))}
+              </View>
+            </Section>
+          ) : null}
 
           {(w.word_family?.length || w.roots?.length || w.mnemonic || w.common_mistakes) ? (
             <ExpandableGroup title="More about this word" testID="more-about-word">
@@ -263,21 +330,57 @@ export default function WordDetail() {
         </ScrollView>
       )}
 
-      {/* sticky CTA */}
+      {/* sticky CTA — 5-state adaptive, driven by real backend status */}
       {w ? (
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
           <Button
-            label={d?.progress?.status === 'MASTERED' ? 'Keep it fresh' : 'Practice'}
+            label={ctaLabel(d?.progress?.status)}
             icon="play"
             style={{ flex: 1 }}
             onPress={() => router.push(`/session?source=word&ref=${w.id}`)}
             testID="word-practice-button"
+            accessibilityLabel={`${ctaLabel(d?.progress?.status)} ${w.headword}`}
           />
-          <Button label={d?.saved ? 'Saved' : 'Save'} variant="secondary" icon={d?.saved ? 'bookmark' : 'bookmark-outline'} style={{ flex: 1 }} onPress={toggleSave} testID="word-save-cta" />
+          <Button
+            label={d?.saved ? 'Saved' : 'Save'}
+            variant="secondary"
+            icon={d?.saved ? 'bookmark' : 'bookmark-outline'}
+            style={{ flex: 1 }}
+            onPress={toggleSave}
+            testID="word-save-cta"
+            accessibilityLabel={d?.saved ? 'Remove from saved' : 'Save word'}
+          />
         </View>
       ) : null}
     </View>
   );
+}
+
+// ---- Learner-friendly state → label helpers (no fabrication; status comes
+// from the backend progress record). "Not learned yet" is only shown when the
+// backend returned a progress record with status NEW/SEEN; absence of the
+// progress object leaves the pill hidden entirely.
+function friendlyStatus(status: string | undefined): string {
+  switch ((status ?? '').toUpperCase()) {
+    case 'NEW':       return 'Not learned yet';
+    case 'SEEN':      return 'Just met';
+    case 'LEARNING':  return "You're learning this";
+    case 'RECALLING': return "You're getting this";
+    case 'MASTERED':  return 'Mastered';
+    default:          return status ?? '';
+  }
+}
+
+function ctaLabel(status: string | undefined): string {
+  switch ((status ?? '').toUpperCase()) {
+    case 'LEARNING':  return 'Continue learning';
+    case 'RECALLING': return 'Practice this word';
+    case 'MASTERED':  return 'Keep it fresh';
+    case 'SEEN':      return 'Practice this word';
+    case 'NEW':       return 'Learn this word';
+    // No progress record yet (backend returned null) → treat as not started.
+    default:          return 'Learn this word';
+  }
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -372,6 +475,17 @@ const useStyles = makeStyles((t) => ({
     minHeight: 32,
   },
   expandableTitle: { letterSpacing: 0.5 },
+  translationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: t.spacing.sm,
+    paddingVertical: 4,
+  },
+  translationLang: {
+    minWidth: 42,
+    marginTop: 3,
+    letterSpacing: 0.5,
+  },
   sectionTitle: { marginBottom: t.spacing.sm, letterSpacing: 0.5 },
   quote: { flexDirection: 'row', gap: t.spacing.sm, backgroundColor: t.colors.surfaceTertiary, borderRadius: t.radius.md, padding: t.spacing.lg },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm },
