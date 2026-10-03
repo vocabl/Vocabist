@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Pressable, ScrollView, TextInput, Platform } from 'react-native';
+import { View, Pressable, ScrollView, TextInput, Platform, Keyboard } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -53,6 +53,7 @@ export default function Session() {
   } | null>(null);
   const [missedIds, setMissedIds] = useState<string[]>([]);
   const [masteredCount, setMasteredCount] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const startedAt = useRef(Date.now());
   const sessionStart = useRef(Date.now());
 
@@ -77,9 +78,11 @@ export default function Session() {
   };
 
   const check = async () => {
-    if (!q) return;
+    if (!q || isSubmitting || phase !== 'question') return;
     const ans = q.mode === 'spelling' ? typed.trim() : selected;
     if (!ans) return;
+    setIsSubmitting(true);
+    Keyboard.dismiss();
     const correct = ans.toLowerCase() === q.answer.toLowerCase();
     setIsCorrect(correct);
     setPhase('feedback');
@@ -105,10 +108,11 @@ export default function Session() {
         just_mastered: res.just_mastered,
       });
       if (res.just_mastered) setMasteredCount((c) => c + 1);
-    } catch { /* ignore */ }
+    } catch { /* server ignored — still show local correct/incorrect */ }
     if (!correct) {
       setMissedIds((ids) => (ids.includes(q.word_id) ? ids : [...ids, q.word_id]));
     }
+    setIsSubmitting(false);
   };
 
   const nextQuestion = async () => {
@@ -246,11 +250,22 @@ export default function Session() {
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
       {/* top bar */}
       <View style={styles.topBar}>
-        <Pressable testID="close-session-button" onPress={() => router.replace('/(tabs)/home')} hitSlop={10}>
+        <Pressable
+          testID="close-session-button"
+          onPress={() => router.replace('/(tabs)/home')}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Close session"
+        >
           <Icon name="close" size={26} color={colors.onSurface} />
         </Pressable>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${Math.max(4, progress * 100)}%` }]} />
+        <View style={{ flex: 1 }}>
+          <AppText size={12} weight="medium" color={colors.onSurfaceTertiary} style={styles.sessionTitle}>
+            {sessionTitle(String(source))}
+          </AppText>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${Math.max(4, progress * 100)}%` }]} />
+          </View>
         </View>
         <AppText size={13} weight="medium" color={colors.muted}>{index + 1}/{questions.length}</AppText>
       </View>
@@ -304,11 +319,14 @@ export default function Session() {
                   testID="spelling-input"
                   value={typed}
                   onChangeText={setTyped}
-                  editable={phase !== 'feedback'}
+                  editable={phase !== 'feedback' && !isSubmitting}
                   autoCapitalize="none"
                   autoCorrect={false}
                   placeholder="Type the word"
                   placeholderTextColor={colors.muted}
+                  accessibilityLabel="Type the spelling of the word"
+                  returnKeyType="done"
+                  onSubmitEditing={() => check()}
                   style={[styles.spellInput, phase === 'feedback' && (isCorrect ? styles.optCorrect : styles.optWrong)]}
                 />
                 {q.hint ? <AppText size={14} color={colors.muted} style={{ marginTop: 10 }}>Hint: {q.hint}</AppText> : null}
@@ -329,9 +347,12 @@ export default function Session() {
                     <Pressable
                       key={opt}
                       testID={`option-${opt}`}
-                      disabled={phase === 'feedback'}
+                      disabled={phase === 'feedback' || isSubmitting}
                       onPress={() => setSelected(opt)}
                       style={optStyle}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSel, disabled: phase === 'feedback' || isSubmitting }}
+                      accessibilityLabel={opt}
                     >
                       <AppText size={16} weight="medium" color={colors.onSurface} style={{ flex: 1 }}>{opt}</AppText>
                       {phase === 'feedback' && isAns ? <Icon name="check-circle" size={20} color={colors.success} /> : null}
@@ -410,15 +431,53 @@ export default function Session() {
         ) : null}
 
         {showTeach ? (
-          <Button testID="teach-continue-button" label="Practice this word" onPress={beginQuestion} />
+          <Button
+            testID="teach-continue-button"
+            label="Practice this word"
+            onPress={beginQuestion}
+            accessibilityLabel={`Start practising ${q.card.headword}`}
+          />
         ) : phase === 'question' ? (
-          <Button testID="check-button" label="Check" onPress={check} disabled={q.mode === 'spelling' ? !typed.trim() : !selected} />
+          <Button
+            testID="check-button"
+            label={isSubmitting ? 'Checking…' : 'Check'}
+            onPress={check}
+            disabled={isSubmitting || (q.mode === 'spelling' ? !typed.trim() : !selected)}
+            accessibilityLabel="Submit answer"
+          />
         ) : (
-          <Button testID="next-button" label={index + 1 >= questions.length ? 'Finish' : 'Continue'} onPress={nextQuestion} />
+          <Button
+            testID="next-button"
+            label={index + 1 >= questions.length ? 'Finish' : 'Continue'}
+            onPress={nextQuestion}
+            accessibilityLabel={index + 1 >= questions.length ? 'Finish session' : 'Next question'}
+          />
         )}
       </View>
     </View>
   );
+}
+
+function sessionTitle(source: string): string {
+  switch (source) {
+    case 'slipping':
+    case 'review':
+      return 'REVIEW';
+    case 'mission':
+      return "TODAY'S MISSION";
+    case 'word':
+      return 'WORD PRACTICE';
+    case 'topic':
+      return 'TOPIC PRACTICE';
+    case 'exam':
+      return 'EXAM PRACTICE';
+    case 'saved':
+      return 'SAVED WORDS';
+    case 'list':
+      return 'PRACTICE';
+    default:
+      return 'PRACTICE';
+  }
 }
 
 function modeLabel(mode: string) {
@@ -434,9 +493,9 @@ function modeLabel(mode: string) {
       sentence_completion: 'Complete the sentence',
       context_choice: 'Which fits best?',
       word_usage: 'How is it used?',
-      confusing_words: 'Spot the right one',
-      word_family: 'Word family',
-      mixed_adaptive: 'Mixed practice',
+      confusing_words: "Don't mix these up",
+      word_family: 'Explore the word family',
+      mixed_adaptive: 'Adaptive practice',
     } as Record<string, string>)[mode] ?? 'Question'
   );
 }
@@ -447,6 +506,7 @@ const useStyles = makeStyles((t) => ({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md, paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md },
   progressTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: t.colors.surfaceTertiary, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: t.colors.brand, borderRadius: 4 },
+  sessionTitle: { letterSpacing: 0.5, marginBottom: 4 },
   body: { padding: t.spacing.lg, paddingTop: t.spacing.md, flexGrow: 1 },
   teachCard: { backgroundColor: t.colors.surfaceSecondary, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.border, padding: t.spacing.xl, ...t.shadow.sm },
   teachTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
