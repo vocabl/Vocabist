@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, ScrollView } from 'react-native';
+import { View, ScrollView, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -30,9 +30,9 @@ export default function Profile() {
   const p = pQ.data;
 
   const stats = [
-    { label: 'Mastered', value: p?.words_mastered ?? 0, icon: 'check-decagram', color: colors.success },
+    { label: 'Mastered', value: p?.words_mastered ?? 0, icon: 'check-decagram', color: colors.success, sub: p?.words_learned ? `of ${p.words_learned} learned` : undefined },
     { label: 'Learned', value: p?.words_learned ?? 0, icon: 'book-open-variant', color: colors.brand },
-    { label: 'Day streak', value: p?.streak ?? 0, icon: 'fire', color: colors.warning },
+    { label: 'Day streak', value: p?.streak ?? 0, icon: 'fire', color: colors.warning, sub: p && p.longest_streak > (p.streak ?? 0) ? `best ${p.longest_streak}` : undefined },
     { label: 'Accuracy', value: `${p?.accuracy ?? 0}%`, icon: 'target', color: colors.info },
   ];
 
@@ -77,10 +77,56 @@ export default function Profile() {
               <Icon name={s.icon as any} size={22} color={s.color} />
               <AppText weight="semibold" size={22} style={{ marginTop: 8 }}>{s.value}</AppText>
               <AppText size={12} color={colors.muted}>{s.label}</AppText>
+              {s.sub ? (
+                <AppText size={11} color={colors.onSurfaceTertiary} style={{ marginTop: 2 }}>{s.sub}</AppText>
+              ) : null}
             </Card>
           ))}
         </View>
       )}
+
+      {/* Learning snapshot — direct links to the words behind the numbers */}
+      {!pQ.isLoading ? (
+        <Card style={styles.snapshotCard} testID="learning-snapshot">
+          <View style={styles.snapshotHead}>
+            <Icon name="chart-arc" size={18} color={colors.brand} />
+            <AppText weight="medium" size={15}>Your learning</AppText>
+          </View>
+          <AppText size={13} color={colors.muted} style={{ marginTop: 4 }}>
+            {p?.study_minutes ? `${p.study_minutes} min practised in total` : 'Start a session to begin building your vocabulary.'}
+          </AppText>
+          <View style={styles.snapshotRow}>
+            <Pressable
+              testID="snapshot-review"
+              onPress={() => router.push('/review')}
+              style={styles.snapshotTile}
+              accessibilityRole="button"
+              accessibilityLabel="Open words to review"
+            >
+              <Icon name="clock-alert-outline" size={18} color={colors.warning} />
+              <AppText size={12} color={colors.muted} style={{ marginTop: 6 }}>Review slipping</AppText>
+              <View style={styles.snapshotCta}>
+                <AppText size={12} weight="medium" color={colors.brand}>Open</AppText>
+                <Icon name="chevron-right" size={14} color={colors.brand} />
+              </View>
+            </Pressable>
+            <Pressable
+              testID="snapshot-saved"
+              onPress={() => router.push('/saved')}
+              style={styles.snapshotTile}
+              accessibilityRole="button"
+              accessibilityLabel="Open saved words"
+            >
+              <Icon name="bookmark-multiple-outline" size={18} color={colors.brand} />
+              <AppText size={12} color={colors.muted} style={{ marginTop: 6 }}>Saved words</AppText>
+              <View style={styles.snapshotCta}>
+                <AppText size={12} weight="medium" color={colors.brand}>Open</AppText>
+                <Icon name="chevron-right" size={14} color={colors.brand} />
+              </View>
+            </Pressable>
+          </View>
+        </Card>
+      ) : null}
 
       {/* Achievements */}
       <AppText weight="medium" size={16} style={styles.section}>Achievements</AppText>
@@ -140,4 +186,22 @@ const useStyles = makeStyles((t) => ({
   achFill: { height: '100%', backgroundColor: t.colors.brand, borderRadius: 3 },
   proCard: { borderColor: t.colors.brandSecondary },
   proHead: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm },
+  snapshotCard: {},
+  snapshotHead: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm },
+  snapshotRow: { flexDirection: 'row', gap: t.spacing.md, marginTop: t.spacing.lg },
+  snapshotTile: {
+    flex: 1,
+    backgroundColor: t.colors.surfaceSecondary,
+    borderRadius: t.radius.md,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    padding: t.spacing.md,
+    minHeight: 92,
+  },
+  snapshotCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: t.spacing.sm,
+  },
 }));

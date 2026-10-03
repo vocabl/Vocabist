@@ -117,7 +117,7 @@ export default function Home() {
 
       {/* Smart review nudge — urgency first, above stats */}
       {slippingQ.data && slippingQ.data.count > 0 ? (
-        <Card style={styles.slipCard} onPress={() => router.push('/session?source=slipping')} testID="slipping-card">
+        <Card style={styles.slipCard} onPress={() => router.push('/review')} testID="slipping-card">
           <View style={[styles.statIcon, { backgroundColor: '#FBEAEA', marginBottom: 0 }]}>
             <Icon name="clock-alert-outline" size={20} color={colors.error} />
           </View>

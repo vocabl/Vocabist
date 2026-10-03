@@ -85,15 +85,17 @@ export default function Learn() {
       )}
 
       <AppText weight="medium" size={16} style={styles.section}>Saved words</AppText>
-      <Card style={styles.topicRow} onPress={() => (savedQ.data?.words.length ? router.push('/session?source=saved') : null)} testID="practice-saved">
+      <Card style={styles.topicRow} onPress={() => router.push('/saved')} testID="saved-words-card">
         <View style={[styles.topicIcon, { backgroundColor: '#FBEEDD' }]}>
           <Icon name="bookmark-multiple-outline" size={22} color={colors.warning} />
         </View>
         <View style={{ flex: 1 }}>
-          <AppText weight="medium" size={16}>Review your saved words</AppText>
-          <AppText size={13} color={colors.muted} style={{ marginTop: 2 }}>{savedQ.data?.words.length ?? 0} saved</AppText>
+          <AppText weight="medium" size={16}>Your saved words</AppText>
+          <AppText size={13} color={colors.muted} style={{ marginTop: 2 }}>
+            {savedQ.isLoading ? 'Loading…' : `${savedQ.data?.words.length ?? 0} saved · tap to open`}
+          </AppText>
         </View>
-        <Icon name={savedQ.data?.words.length ? 'play-circle' : 'lock-outline'} size={26} color={savedQ.data?.words.length ? colors.brand : colors.muted} />
+        <Icon name="chevron-right" size={22} color={colors.muted} />
       </Card>
     </ScrollView>
   );
