@@ -1010,33 +1010,32 @@ async def ai_coach(word_id: str, user: dict = Depends(get_current_user)):
     if not EMERGENT_LLM_KEY:
         raise HTTPException(status_code=503, detail="AI is not configured")
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"coach-{word_id}",
-        system_message="You are a friendly, concise English vocabulary coach. Always return strict JSON.",
-    ).with_model("openai", "gpt-5.6-luna")
+    # Route through the centralized AI Gateway (usage tracked; fallback-capable).
+    # Behavior preserved: AI_COACH task keeps Emergent GPT-5.6 Luna as primary.
+    from ai.gateway import gateway as ai_gateway
+    from ai.schemas import Task as AITask
+    from ai.errors import AIError as _AIError
     prompt = (
         f'For the English word "{w["headword"]}" (meaning: {w.get("simple_definition")}), '
         'return ONLY JSON: {"explanation":"a warm 2-sentence plain-English explanation a learner will remember",'
         '"example":"one fresh natural example sentence using the word","mnemonic":"a short vivid memory hook"}'
     )
+    messages = [
+        {"role": "system", "content": "You are a friendly, concise English vocabulary coach. Always return strict JSON."},
+        {"role": "user", "content": prompt},
+    ]
     try:
-        resp = await chat.send_message(UserMessage(text=prompt))
+        res = await ai_gateway.run_json(AITask.AI_COACH, messages, max_tokens=600,
+                                        user_id=user["user_id"])
+    except _AIError:
+        raise HTTPException(status_code=502, detail="AI Coach is busy, try again")
     except Exception:
         raise HTTPException(status_code=502, detail="AI Coach is busy, try again")
 
-    text = resp if isinstance(resp, str) else str(resp)
-    text = re.sub(r"^```(json)?|```$", "", text.strip()).strip()
-    s, e = text.find("{"), text.rfind("}")
+    parsed = res.data if isinstance(res.data, dict) else {}
     content = None
-    if s != -1 and e != -1:
-        try:
-            parsed = json.loads(text[s:e + 1])
-            if all(isinstance(parsed.get(k), str) and parsed[k].strip() for k in ("explanation", "example", "mnemonic")):
-                content = {k: parsed[k].strip() for k in ("explanation", "example", "mnemonic")}
-        except Exception:
-            content = None
+    if all(isinstance(parsed.get(k), str) and parsed[k].strip() for k in ("explanation", "example", "mnemonic")):
+        content = {k: parsed[k].strip() for k in ("explanation", "example", "mnemonic")}
     if not content:
         raise HTTPException(status_code=502, detail="Could not generate a good explanation, try again")
 
@@ -1391,6 +1390,11 @@ async def startup():
 
 
 app.include_router(api)
+
+# Internal Admin API — server-side protected (mounted after repo + auth are defined).
+from admin_routes import build_admin_router  # noqa: E402
+app.include_router(build_admin_router(repo, get_current_user))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in CORS_ORIGINS.split(",")] if CORS_ORIGINS != "*" else ["*"],

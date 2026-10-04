@@ -316,3 +316,22 @@ class DatabaseRepository:
     async def setup_indexes(self) -> None:
         """Create DB-specific indexes. No-op for Supabase (indexes are in migrations)."""
         raise NotImplementedError
+
+    # ------------------------------------------------------------------ #
+    # ADMIN — content counts + review queue
+    # ------------------------------------------------------------------ #
+    async def count_words_by_status(self, status: str) -> int:
+        raise NotImplementedError
+
+    async def count_words_by_provenance(self, provenance: str) -> int:
+        raise NotImplementedError
+
+    async def list_words_by_status(
+        self,
+        status: str,
+        provenance: Optional[str] = None,
+        search: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        raise NotImplementedError

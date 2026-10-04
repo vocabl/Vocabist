@@ -776,3 +776,38 @@ class SupabaseRepository(DatabaseRepository):
     async def setup_indexes(self) -> None:
         """No-op for Supabase — indexes are created by migration SQL files."""
         pass
+
+    # ------------------------------------------------------------------ #
+    # ADMIN — content counts + review queue
+    # ------------------------------------------------------------------ #
+    async def count_words_by_status(self, status: str) -> int:
+        sb = await self._client()
+        r = await sb.table("words").select("id", count="exact").eq(
+            "status", status
+        ).limit(1).execute()
+        return r.count or 0
+
+    async def count_words_by_provenance(self, provenance: str) -> int:
+        sb = await self._client()
+        r = await sb.table("words").select("id", count="exact").eq(
+            "provenance", provenance
+        ).limit(1).execute()
+        return r.count or 0
+
+    async def list_words_by_status(
+        self,
+        status: str,
+        provenance: Optional[str] = None,
+        search: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        sb = await self._client()
+        q = sb.table("words").select("*", count="exact").eq("status", status)
+        if provenance:
+            q = q.eq("provenance", provenance)
+        if search:
+            q = q.ilike("headword", f"%{search}%")
+        end = offset + limit - 1
+        r = await q.order("created_at", desc=True).range(offset, end).execute()
+        return (r.count or 0), _normalize_docs(r.data or [])

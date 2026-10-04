@@ -1,0 +1,54 @@
+{
+  "summary": "Admin AI Platform (P1) tested end-to-end. 29/31 pytest integration tests pass. All admin authorization, dashboard, models/toggle/ping, routing/capability-rejection, translate, embed, review-queue listing, and student regressions pass. Frontend admin UI loads correctly for the admin (dashboard + Models/Routing/Jobs/Usage/Review all render) and is correctly hidden for the student. CRITICAL BACKEND BUG: vocabulary_generation jobs FAIL on topic foreign-key constraint ('Textual studies' not in topics table) — no new REVIEW words are created, blocking the full REVIEW → publish/regenerate workflow. Minor: AI-coach response is wrapped as {content: {...}} but spec said returns {explanation, example, mnemonic} at top level — frontend already uses .content so it works end-to-end, but the shape differs from the problem statement.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/admin/ai/jobs (vocabulary_generation)",
+        "issue": "Job FAILS with FK violation when AI returns a topic that does not exist in the topics table. Example error: 'insert or update on table \"words\" violates foreign key constraint \"words_topic_fkey\". Key (topic)=(Textual studies) is not present in table \"topics\".' Observed on a C1 'Rare Academic' job (job_d69bf57948ef) — generated_count=0, valid_count=0, status=FAILED. A pre-existing B2 'Academic' job (job_731f6f9cff17) also shows FAILED (0 new, 10 dup, 0 rejected, 10 gen) suggesting ingest routinely rejects AI output. As a consequence, the dashboard shows 'In review: 0' and the REVIEW → publish/reject/archive/regenerate workflow cannot be exercised against freshly generated AI words.",
+        "priority": "CRITICAL",
+        "fix_hint": "In bulk_ingest / resolve path for AI_GENERATED words, either (a) coerce topic to NULL / fall back to a sentinel 'general' topic when the generated topic is not in exam_slugs/topics, (b) auto-create the missing topic row, or (c) validate at generation step (content_validation) and move the entire word to warnings/REVIEW instead of raising to a FK error. Current content_validation only WARNS on missing topic (content_validation.py:205) — it does not block or coerce unknown topics."
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/words/{id}/ai-coach",
+        "issue": "Returns {content:{explanation,example,mnemonic}, provenance, cached} — not {explanation,example,mnemonic} at top level as described in the review request. Frontend already consumes .content so UI works; just note the contract divergence from the spec."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_ai_platform_integration.py",
+    "/app/test_reports/pytest/pytest_iter6_admin.xml"
+  ],
+  "action_items": [
+    "FIX FK bug in content_ingest for AI_GENERATED words: do not pass an unknown topic to the DB. Either coerce to NULL / 'general', auto-create the topic row, or hard-fail at validation (so the word is dropped with a visible reason) rather than raising the Supabase FK 23503. Verify by re-running POST /api/admin/ai/jobs {count:3,cefr:'C1',topic:'Rare Academic'} and polling until COMPLETED/PARTIAL, then confirm GET /api/admin/vocabulary/review returns new REVIEW words.",
+    "After the FK fix, re-run the integration suite (/app/backend/tests/test_admin_ai_platform_integration.py). The 5 skipped review-workflow tests (regenerate/publish/reject/archive) will then execute end-to-end.",
+    "Optional: align /api/words/{id}/ai-coach response shape with the spec (flatten content → top-level), or update the review-request documentation to reflect the {content, provenance, cached} wrapper."
+  ],
+  "critical_code_review_comments": [
+    "admin_routes.py: /api/admin/me correctly uses get_current_user (not get_current_admin) so students can also discover is_admin:false — good.",
+    "admin_routes.py: PUT /ai/routing validates capability per model (returns 400 on invalid) — matches contract.",
+    "admin_routes.py: /vocabulary/{id}/publish and /approve both validate before publish — correct gating.",
+    "jobs flow: resolve_status forces AI_GENERATED → REVIEW (content_ingest.py:42) — contract-compliant (never auto-publish).",
+    "content_validation.py only WARNS on missing/unknown topic — root cause of the FK crash. Needs guard before DB write.",
+    "Dashboard providers list uses real registry.merge_state statuses (AVAILABLE/UNAVAILABLE/UNKNOWN/DISABLED) — no faked OK/HEALTHY values. Verified live (3 nvidia AVAILABLE, 3 UNAVAILABLE, 2 UNKNOWN, emergent AVAILABLE)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_ai_platform_integration.py (created — 31 integration tests)"
+  ],
+  "success_rate": {
+    "backend": "93.5% (29/31 pytest, 5 skipped due to empty REVIEW queue caused by generation FK bug)",
+    "frontend": "100% — admin dashboard + all 5 sub-screens (Models/Routing/Jobs/Usage/Review) render; admin-entry correctly shown for admin and hidden for student"
+  },
+  "seed_data_creation": "None. Used existing qa_admin@vocabist.com and test@vocabist.com; onboarding completed in UI for the student test only.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The FK bug (words_topic_fkey on 'Textual studies') is the single blocker for the full REVIEW workflow. Dashboard shows 'In review: 0' which means no AI-generated REVIEW words currently exist in the DB. Once main agent fixes topic handling in bulk_ingest (coerce/null-out unknown topics), re-run test_admin_ai_platform_integration.py — the 5 currently-skipped TestReviewWorkflow tests will exercise regenerate/publish/reject/archive against real REVIEW words. All other admin surfaces (auth, dashboard shape, models, toggle, ping, routing validation, translate, embed, student 403, student is_admin:false, admin is_admin:true, student regression APIs) are verified working.",
+  "rca_of_issue": "ROOT CAUSE: content_ingest/bulk_ingest for AI_GENERATED words passes the AI-returned 'topic' string straight to the Supabase insert. The words table has FK 'words_topic_fkey' → topics(slug). content_validation.validate_word only emits a warning for missing topic (content_validation.py:205-206) and never checks membership against the known topics list. When the model returns a plausible-but-unseeded topic (e.g. 'Textual studies'), the insert raises Postgres 23503 which jobs.py catches and marks the entire job FAILED. Reproduction: POST /api/admin/ai/jobs {\"count\":3,\"cefr\":\"C1\",\"topic\":\"Rare Academic\"} with admin token, then GET /api/admin/ai/jobs/{id} → status=FAILED, error contains 'words_topic_fkey'. Mitigation: (1) in bulk_ingest, resolve topic against repo.get_known_topic_slugs() and set to None/'general' if missing; or (2) extend content_validation to add a hard error (not warning) if topic ∉ known_topics so the word is dropped before DB write; or (3) auto-create missing topic rows (lowest friction but may litter the taxonomy)."
+}

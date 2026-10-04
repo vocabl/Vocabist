@@ -60,10 +60,13 @@ async def _load_context(repo) -> Dict[str, Any]:
         if k and k not in id_by_key:
             id_by_key[k] = w["id"]
     exam_slugs = await repo.get_exam_slugs()
+    topics = await repo.get_topics()
+    topic_slugs = {t.get("slug") for t in topics if t.get("slug")}
     return {
         "id_by_key": id_by_key,
         "known_word_ids": set(id_by_key.values()),
         "exam_slugs": exam_slugs,
+        "topic_slugs": topic_slugs,
     }
 
 
@@ -119,6 +122,11 @@ async def ingest_word(
         "lifecycle_version": 1,
         "created_at": _now(),
     })
+    # Coerce an unknown topic to NULL to respect the words.topic → topics.slug
+    # foreign key (AI/import content often supplies a free-text topic label).
+    topic_slugs = context.get("topic_slugs")
+    if topic_slugs is not None and doc.get("topic") and doc["topic"] not in topic_slugs:
+        doc["topic"] = None
     await repo.upsert_word(wid, doc)
 
     # keep shared context consistent for deterministic bulk runs

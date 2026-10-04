@@ -1,6 +1,13 @@
 # Vocabist Test Credentials
 
-## Test User Account
+## Admin Account (production)
+- **Email:** imsunil0202@gmail.com  (configured in ADMIN_EMAILS — server-side admin allowlist)
+- NOTE: this is the user's real account; password is NOT known to the agent.
+
+## QA Admin (temporary — REMOVED after testing)
+- qa_admin@vocabist.com was added to ADMIN_EMAILS only during P1 admin testing and has since been REMOVED. ADMIN_EMAILS now contains only imsunil0202@gmail.com.
+
+## Test User Account (student)
 - **Email:** test@vocabist.com
 - **Password:** test1234
 - **Name:** Test User

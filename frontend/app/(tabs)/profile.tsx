@@ -11,6 +11,7 @@ import { Button } from '@/src/components/Button';
 import { Skeleton } from '@/src/components/Skeleton';
 import { useAuth } from '@/src/auth/AuthContext';
 import { useEntitlement } from '@/src/hooks/useEntitlement';
+import { useIsAdmin } from '@/src/api/admin';
 import { api } from '@/src/api/client';
 
 type Achievement = {
@@ -63,6 +64,7 @@ export default function ProfileProgress() {
   const pQ = useQuery({ queryKey: ['progress'], queryFn: () => api<Progress>('/progress') });
   const slipQ = useQuery({ queryKey: ['slipping'], queryFn: () => api<SlippingData>('/review/slipping') });
   const ent = useEntitlement();
+  const { isAdmin } = useIsAdmin();
   const p = pQ.data;
   const slip = slipQ.data;
 
@@ -320,6 +322,23 @@ export default function ProfileProgress() {
         </View>
       </View>
 
+      {/* ─── ADMIN ─── */}
+      {isAdmin && (
+        <View style={styles.section} testID="admin-section">
+          <AppText weight="medium" size={16} style={styles.sectionTitle}>Internal</AppText>
+          <Card onPress={() => router.push('/admin' as any)} style={styles.adminCard} testID="admin-entry">
+            <View style={styles.adminIcon}>
+              <Icon name="shield-crown-outline" size={20} color={c.brand} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppText weight="medium" size={15}>Admin Control Center</AppText>
+              <AppText size={12} color={c.muted}>AI platform, generation & review</AppText>
+            </View>
+            <Icon name="chevron-right" size={20} color={c.muted} />
+          </Card>
+        </View>
+      )}
+
       {/* ─── ACCOUNT ─── */}
       <View style={styles.section} testID="account-section">
         <AppText weight="medium" size={16} style={styles.sectionTitle}>Account</AppText>
@@ -562,4 +581,9 @@ const useStyles = makeStyles((t) => ({
   proCard: { borderColor: t.colors.brandSecondary },
   proHead: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm },
   accountInfo: { marginTop: t.spacing.md },
+  adminCard: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.md, padding: t.spacing.lg },
+  adminIcon: {
+    width: 40, height: 40, borderRadius: t.radius.sm, backgroundColor: '#E7F0E9',
+    alignItems: 'center', justifyContent: 'center',
+  },
 }));

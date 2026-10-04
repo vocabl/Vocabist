@@ -106,3 +106,16 @@ level, goals, exams, study time, performance, mistakes, review history and maste
 2. Phase G — verified PYQ architecture.
 3. Phase K — AI provider abstraction.
 
+## Phase AI-1 — NVIDIA AI Platform + Admin Control Center (2026-06, P1)
+Additive build on the existing Supabase/custom-auth/monetization app. No DB migration, no auth change, RLS untouched, student features unchanged.
+- **Central AI Gateway** (`backend/ai/`): single entry point `gateway.run_chat/run_json/run_embedding/run_translation/ping`. Feature → Gateway → Task Router → Provider → Model → structured result → validation. No feature calls a provider directly.
+- **Providers**: `NvidiaProvider` (OpenAI-compatible `https://integrate.api.nvidia.com/v1`, chat + embeddings, backend-only `NVIDIA_API_KEY`), `EmergentProvider` (existing GPT-5.6 Luna, kept as fallback + AI Coach). Normalized errors with explicit `fallbackable` flags (timeout/429/5xx/conn/unavailable/malformed → fallback; auth/bad-request/config → no blind fallback).
+- **Registry** (7 NVIDIA + emergent): nemotron-3.5-lightning-30b-a3b, moonshotai/kimi-k3, openai/gpt-oss-20b, nemotron-3-embed-1b (embedding), riva-translate-4b-instruct-v2 (translation), nemotron-3-super-120b-a12b, meta/muse-glimmer-30b (vision). Declares capabilities/modality; status AVAILABLE/UNAVAILABLE/UNKNOWN/DISABLED (never faked — updated only from real calls/ping).
+- **Routing** (12 tasks, configurable, capability-validated) + intelligent fallback; invalid model/task combos rejected (e.g. embed as chat, riva as reasoning, image→GPT-OSS).
+- **Generation jobs** (`ai/jobs.py`): async asyncio background + file-store persistence (no Redis/Celery). Output flows through the EXISTING `content_ingest.bulk_ingest` (provenance=AI_GENERATED) → status REVIEW; never auto-published. Dedupes against the 766-word bank. **Fix**: unknown free-text topic now coerced to NULL (respects words.topic→topics.slug FK).
+- **Admin API** (`backend/admin_routes.py`, all `/api/admin/*` server-protected via `ADMIN_EMAILS` allowlist on existing auth): dashboard, ai/providers, ai/models(+toggle/ping), ai/routing(+PUT validated), ai/usage, ai/jobs(+create/cancel), vocabulary/review, vocabulary/{id} approve/publish/reject/archive/regenerate-field, ai/translate, ai/embed, ai/multimodal/extract.
+- **Usage tracking** (`ai/usage.py`): per-request task/provider/model/success/fallback/latency/tokens (no keys/secrets); aggregation for the dashboard. Token cost shown as "Unavailable" when unknown (never invented).
+- **AI Coach** now routes through the gateway (`AI_COACH` task, Emergent primary) — contract {explanation,example,mnemonic} + free quota preserved.
+- **Admin UI** (`frontend/app/admin/*`): admin-only entry in Progress tab; dashboard, models, routing, jobs, usage, review screens (internal SaaS style).
+- **Tests**: `backend/tests/test_ai_platform.py` (11 unit tests pass) + `backend/tests/test_admin_ai_platform_integration.py` (testing agent). Admin email = imsunil0202@gmail.com.
+
