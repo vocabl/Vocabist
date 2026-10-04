@@ -25,7 +25,7 @@ from content_validation import (  # noqa: E402
 )
 from content_ingest import ingest_word, bulk_ingest, resolve_status, migrate_content_lifecycle  # noqa: E402
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vocabist-audit.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vocabist-restore.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 

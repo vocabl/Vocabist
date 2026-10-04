@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 # Load frontend .env to get EXPO_PUBLIC_BACKEND_URL
 load_dotenv('/app/frontend/.env')
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://vocabist-audit.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://vocabist-restore.preview.emergentagent.com').rstrip('/')
 
 @pytest.fixture(scope="module")
 def test_user():

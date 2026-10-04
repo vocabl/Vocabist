@@ -1,17 +1,28 @@
-# Vocabist — Test Credentials
+# Vocabist Test Credentials
 
-## Email/Password test account
-- Email: `demo@vocably.app`
-- Password: `demo1234`
-- Name: Demo Student
-- Notes: Created via /api/auth/register. Onboarded with IELTS goal (B2, 10 min/day).
+## Test User Account
+- **Email:** test@vocabist.com
+- **Password:** test1234
+- **Name:** Test User
+- **Tier:** free
 
-## Google OAuth (Emergent-managed)
-- Uses Emergent Google login flow (no app-managed password).
-- Any Google account allowed; user is upserted by email.
+## Environment Variables Status
+- **DB_BACKEND:** supabase ✅
+- **SUPABASE_URL:** Configured ✅
+- **SUPABASE_SERVICE_ROLE_KEY:** Configured ✅
+- **EMERGENT_LLM_KEY:** Configured ✅
+- **EXPO_PUBLIC_BACKEND_URL:** Configured ✅
 
-## Backend
-- Base URL (external): value of EXPO_PUBLIC_BACKEND_URL in /app/frontend/.env
-- All API routes are prefixed with `/api`.
-- Auth: send `Authorization: Bearer <token>` where token is returned by
-  /api/auth/login, /api/auth/register, or /api/auth/session.
+## Database Status
+- **Total Words:** 766
+- **Topics:** 6
+- **Exams:** 6
+- **Articles:** 4
+
+## Last Verified
+- Date: 2026-10-04
+- Backend: PASS
+- Frontend: PASS
+- Supabase: PASS
+- Authentication: PASS
+- AI Coach: PASS
