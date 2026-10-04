@@ -11,7 +11,7 @@ const TABS = [
   { name: 'learn', label: 'Learn', icon: 'cards', iconOutline: 'cards-outline', sf: 'square.stack.fill' },
   { name: 'exams', label: 'Exams', icon: 'trophy', iconOutline: 'trophy-outline', sf: 'trophy.fill' },
   { name: 'discover', label: 'Discover', icon: 'compass', iconOutline: 'compass-outline', sf: 'safari.fill' },
-  { name: 'profile', label: 'Profile', icon: 'account-circle', iconOutline: 'account-circle-outline', sf: 'person.crop.circle.fill' },
+  { name: 'profile', label: 'Progress', icon: 'chart-timeline-variant-shimmer', iconOutline: 'chart-timeline-variant-shimmer', sf: 'chart.bar.fill' },
 ] as const;
 
 export default function TabsLayout() {

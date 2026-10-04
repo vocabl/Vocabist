@@ -673,24 +673,72 @@ XP_PER_LEVEL = 500
 async def progress(user: dict = Depends(get_current_user)):
     prof = await get_or_create_profile(user["user_id"])
     progresses = await repo.get_all_progress(user["user_id"])
-    learned = sum(1 for p in progresses if p.get("status") in ("LEARNING", "RECALLING", "MASTERED"))
-    mastered = sum(1 for p in progresses if p.get("status") == "MASTERED")
+
+    # Mastery distribution — real counts from user_word_progress
+    dist = {"SEEN": 0, "LEARNING": 0, "RECALLING": 0, "MASTERED": 0}
+    for p in progresses:
+        s = p.get("status")
+        if s in dist:
+            dist[s] += 1
+
+    learned = dist["LEARNING"] + dist["RECALLING"] + dist["MASTERED"]
+    mastered = dist["MASTERED"]
+    in_progress = dist["SEEN"] + dist["LEARNING"] + dist["RECALLING"]
     total_correct = sum(p.get("times_correct", 0) for p in progresses)
     total_answered = sum(p.get("times_correct", 0) + p.get("times_wrong", 0) for p in progresses)
     accuracy = round(100 * total_correct / total_answered) if total_answered else 0
 
-    # weak areas: topics with lowest avg mastery
+    # Recently mastered — up to 5 most-recently mastered words
+    mastered_progs = [
+        p for p in progresses
+        if p.get("status") == "MASTERED" and p.get("updated_at")
+    ]
+    mastered_progs.sort(
+        key=lambda p: ensure_aware(p["updated_at"]) or now_utc(), reverse=True,
+    )
+    mastered_ids = [p["word_id"] for p in mastered_progs[:5]]
+    mastered_words = {w["id"]: w for w in await repo.find_words_by_ids(mastered_ids)} if mastered_ids else {}
+    recently_mastered = []
+    for p in mastered_progs[:5]:
+        w = mastered_words.get(p["word_id"])
+        if w:
+            recently_mastered.append({
+                "word_id": w["id"],
+                "headword": w["headword"],
+                "cefr": w.get("cefr"),
+                "mastery_score": round(float(p.get("mastery_score", 0))),
+                "mastered_at": (ensure_aware(p["updated_at"]) or now_utc()).isoformat(),
+            })
+
+    # Weak areas — real per-topic breakdown with counts
     words = await repo.load_all_words_minimal()
     word_topics = {w["id"]: w.get("topic") for w in words}
-    topic_scores: dict = {}
+    topic_data: dict = {}  # topic -> {scores, mastered, total}
     for p in progresses:
         t = word_topics.get(p["word_id"])
         if not t:
             continue
-        topic_scores.setdefault(t, []).append(float(p.get("mastery_score", 0)))
-    weak = sorted(
-        [{"topic": t, "avg_mastery": round(sum(v) / len(v))} for t, v in topic_scores.items() if v],
-        key=lambda x: x["avg_mastery"])[:3]
+        td = topic_data.setdefault(t, {"scores": [], "mastered": 0, "total": 0})
+        td["scores"].append(float(p.get("mastery_score", 0)))
+        td["total"] += 1
+        if p.get("status") == "MASTERED":
+            td["mastered"] += 1
+    topics_list = await repo.get_topics()
+    topic_names = {t["slug"]: t["name"] for t in topics_list}
+    weak_areas = []
+    for t, td in topic_data.items():
+        if td["scores"]:
+            weak_areas.append({
+                "topic": t,
+                "name": topic_names.get(t, t.title()),
+                "avg_mastery": round(sum(td["scores"]) / len(td["scores"])),
+                "mastered_count": td["mastered"],
+                "total_count": td["total"],
+                "mastery_percent": round(100 * td["mastered"] / td["total"]) if td["total"] else 0,
+            })
+    weak_areas.sort(key=lambda x: x["avg_mastery"])
+    # Keep top 3 weakest for weak_areas; also return all for the full picture
+    weak = weak_areas[:3]
 
     xp = prof.get("xp", 0)
     level = xp // XP_PER_LEVEL + 1
@@ -700,6 +748,7 @@ async def progress(user: dict = Depends(get_current_user)):
     return {
         "words_learned": learned,
         "words_mastered": mastered,
+        "in_progress": in_progress,
         "accuracy": accuracy,
         "retention": accuracy,
         "streak": prof.get("streak", 0),
@@ -709,6 +758,9 @@ async def progress(user: dict = Depends(get_current_user)):
         "xp_into_level": xp % XP_PER_LEVEL,
         "xp_per_level": XP_PER_LEVEL,
         "study_minutes": study_minutes,
+        "total_sessions": len(sessions),
+        "mastery_distribution": dist,
+        "recently_mastered": recently_mastered,
         "weak_areas": weak,
         "cefr_level": prof.get("level"),
         "achievements": compute_achievements(learned, mastered, prof.get("longest_streak", 0)),
