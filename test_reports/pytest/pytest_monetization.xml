@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="9" time="40.935" timestamp="2026-10-04T18:17:14.758905+00:00" hostname="agent-env-228efe04-239f-4ee5-8566-570c256bc70d"><testcase classname="backend.tests.test_monetization" name="test_entitlements_free_user" time="5.381" /><testcase classname="backend.tests.test_monetization" name="test_restore_not_connected" time="0.719" /><testcase classname="backend.tests.test_monetization" name="test_activate_subscription" time="5.667" /><testcase classname="backend.tests.test_monetization" name="test_entitlements_after_activation" time="6.322"><failure message="AssertionError: Expected is_pro=true after activation, got False&#10;assert False is True">backend/tests/test_monetization.py:138: in test_entitlements_after_activation
+    assert d["is_pro"] is True, f"Expected is_pro=true after activation, got {d['is_pro']}"
+E   AssertionError: Expected is_pro=true after activation, got False
+E   assert False is True</failure></testcase><testcase classname="backend.tests.test_monetization" name="test_cancel_subscription" time="9.912" /><testcase classname="backend.tests.test_monetization" name="test_activate_invalid_plan" time="1.200"><failure message="AssertionError: Unexpected failure: Internal Server Error&#10;assert 500 == 200&#10; +  where 500 = &lt;Response [500]&gt;.status_code">backend/tests/test_monetization.py:190: in test_activate_invalid_plan
+    assert r.status_code == 200, f"Unexpected failure: {r.text}"
+E   AssertionError: Unexpected failure: Internal Server Error
+E   assert 500 == 200
+E    +  where 500 = &lt;Response [500]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_monetization" name="test_cancel_when_already_free" time="5.292" /><testcase classname="backend.tests.test_monetization" name="test_double_activation" time="6.343"><failure message="assert 500 == 200&#10; +  where 500 = &lt;Response [500]&gt;.status_code">backend/tests/test_monetization.py:213: in test_double_activation
+    assert r2.status_code == 200
+E   assert 500 == 200
+E    +  where 500 = &lt;Response [500]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_monetization" name="test_summary" time="0.000" /></testsuite></testsuites>

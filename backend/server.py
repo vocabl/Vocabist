@@ -796,35 +796,111 @@ async def analytics(body: AnalyticsBody, user: dict = Depends(get_current_user))
 # entitlements / subscription
 # ---------------------------------------------------------------------------
 
+# Pricing configuration — single source of truth.
+# Placeholder values until a real payment provider is connected.
+PRICING = {
+    "monthly": {"price_display": "$7.99", "period": "month", "interval_months": 1},
+    "annual":  {"price_display": "$49.99", "period": "year", "interval_months": 12},
+}
+PAYMENT_PROVIDER_CONNECTED = False  # flip to True when a real provider is wired
+
 
 class SubscribeBody(BaseModel):
     plan: str = "monthly"
 
 
+async def get_subscription_state(user_id: str) -> dict:
+    """Canonical server-side entitlement check. Single source of truth."""
+    from db import get_db
+    _repo = get_db()
+    user = await _repo.get_user_by_id(user_id)
+    tier = (user or {}).get("tier", "free")
+
+    # Look up the latest subscription record
+    sb = await _repo._client() if hasattr(_repo, "_client") else None
+    sub_record = None
+    if sb:
+        r = await sb.table("subscriptions").select("*").eq(
+            "user_id", user_id
+        ).order("started_at", desc=True).limit(1).maybe_single().execute()
+        sub_record = r.data if r is not None else None
+
+    status = (sub_record or {}).get("status", "none")
+    platform = (sub_record or {}).get("platform", "none")
+    plan = (sub_record or {}).get("plan")
+    started_at = (sub_record or {}).get("started_at")
+    cancelled_at = (sub_record or {}).get("cancelled_at")
+
+    is_pro = tier == "pro" and status == "active"
+
+    return {
+        "plan": "pro" if is_pro else "free",
+        "tier": tier,
+        "is_pro": is_pro,
+        "status": status,
+        "source": platform,
+        "subscription_plan": plan,
+        "started_at": started_at,
+        "cancelled_at": cancelled_at,
+        "provider_connected": PAYMENT_PROVIDER_CONNECTED,
+    }
+
+
+async def require_pro(request: Request) -> dict:
+    """Dependency that raises 403 if user is not Pro."""
+    user = await get_current_user(request)
+    state = await get_subscription_state(user["user_id"])
+    if not state["is_pro"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PRO_REQUIRED",
+                "message": "This feature requires Vocabist Pro.",
+                "upgrade_url": "/paywall",
+            },
+        )
+    return user
+
+
 @api.get("/entitlements")
 async def get_entitlements(user: dict = Depends(get_current_user)):
-    tier = user.get("tier", "free")
-    ent = entitlements_for(tier)
+    state = await get_subscription_state(user["user_id"])
+    ent = entitlements_for("pro" if state["is_pro"] else "free")
     return {
-        "tier": tier,
-        "is_pro": tier == "pro",
+        **state,
         "limits": ent,
         "ai_coach_used_today": await repo.count_ai_coach_today(user["user_id"]),
+        "pricing": PRICING,
     }
 
 
 @api.post("/subscription/activate")
-async def activate_subscription(body: SubscribeBody, user: dict = Depends(get_current_user)):
+async def activate_subscription_endpoint(body: SubscribeBody, user: dict = Depends(get_current_user)):
+    if PAYMENT_PROVIDER_CONNECTED:
+        # Future: validate receipt/token from real provider here
+        pass
+    # Mock activation — only allowed when no real provider is connected
+    # In production with a real provider, this would verify the purchase first
     await repo.activate_subscription(user["user_id"], body.plan, now_utc())
-    await repo.log_event(user["user_id"], "subscription_started", {"plan": body.plan})
-    return {"tier": "pro"}
+    await repo.log_event(user["user_id"], "subscription_started", {
+        "plan": body.plan, "source": "mock" if not PAYMENT_PROVIDER_CONNECTED else "provider",
+    })
+    return {"tier": "pro", "source": "mock" if not PAYMENT_PROVIDER_CONNECTED else "provider"}
 
 
 @api.post("/subscription/cancel")
-async def cancel_subscription(user: dict = Depends(get_current_user)):
+async def cancel_subscription_endpoint(user: dict = Depends(get_current_user)):
     await repo.cancel_subscription(user["user_id"])
     await repo.log_event(user["user_id"], "subscription_cancelled", {})
     return {"tier": "free"}
+
+
+@api.post("/subscription/restore")
+async def restore_subscription(user: dict = Depends(get_current_user)):
+    if not PAYMENT_PROVIDER_CONNECTED:
+        return {"restored": False, "message": "Payment provider is not connected yet. Purchases will be restorable once billing is configured."}
+    # Future: query provider for existing purchases
+    return {"restored": False, "message": "No active subscription found."}
 
 
 # ---------------------------------------------------------------------------

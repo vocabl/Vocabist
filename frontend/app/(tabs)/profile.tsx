@@ -10,6 +10,7 @@ import { Icon } from '@/src/components/Icon';
 import { Button } from '@/src/components/Button';
 import { Skeleton } from '@/src/components/Skeleton';
 import { useAuth } from '@/src/auth/AuthContext';
+import { useEntitlement } from '@/src/hooks/useEntitlement';
 import { api } from '@/src/api/client';
 
 type Achievement = {
@@ -61,6 +62,7 @@ export default function ProfileProgress() {
 
   const pQ = useQuery({ queryKey: ['progress'], queryFn: () => api<Progress>('/progress') });
   const slipQ = useQuery({ queryKey: ['slipping'], queryFn: () => api<SlippingData>('/review/slipping') });
+  const ent = useEntitlement();
   const p = pQ.data;
   const slip = slipQ.data;
 
@@ -321,26 +323,54 @@ export default function ProfileProgress() {
       {/* ─── ACCOUNT ─── */}
       <View style={styles.section} testID="account-section">
         <AppText weight="medium" size={16} style={styles.sectionTitle}>Account</AppText>
-        <Card style={styles.proCard} testID="upgrade-pro-card">
-          <View style={styles.proHead}>
-            <Icon name={user?.tier === 'pro' ? 'crown' : 'crown-outline'} size={20} color={c.warning} />
-            <AppText weight="semibold" size={16}>
-              {user?.tier === 'pro' ? 'Vocabist Pro · Active' : 'Vocabist Pro'}
+
+        {/* Plan status */}
+        <View style={styles.planStatus} testID="plan-status">
+          <View style={styles.planStatusIcon}>
+            <Icon name={ent.isPro ? 'crown' : 'crown-outline'} size={18}
+              color={ent.isPro ? c.warning : c.muted} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <AppText weight="medium" size={14}>
+              {ent.isPro ? 'Vocabist Pro' : 'Vocabist Free'}
+            </AppText>
+            <AppText size={12} color={c.muted}>
+              {ent.isPro
+                ? `${ent.data?.subscription_plan ?? 'Pro'} plan${ent.data?.source === 'mock' ? ' · Preview' : ''}`
+                : 'Core learning features included'}
             </AppText>
           </View>
-          <AppText size={13} color={c.onSurfaceTertiary} style={{ marginTop: 4, lineHeight: 18 }}>
-            {user?.tier === 'pro'
-              ? 'Unlimited learning, all exams, and AI features.'
-              : 'Unlimited learning, full exam libraries, and AI features.'}
-          </AppText>
+        </View>
+
+        {!ent.isPro && (
+          <Card style={styles.proCard} testID="upgrade-pro-card">
+            <View style={styles.proHead}>
+              <Icon name="crown-outline" size={20} color={c.warning} />
+              <AppText weight="semibold" size={16}>Upgrade to Pro</AppText>
+            </View>
+            <AppText size={13} color={c.onSurfaceTertiary} style={{ marginTop: 4, lineHeight: 18 }}>
+              Unlimited learning, all exam libraries, and advanced AI features.
+            </AppText>
+            <Button
+              label="See plans"
+              icon="crown-outline"
+              onPress={() => router.push('/paywall')}
+              style={{ marginTop: 12 }}
+              testID="upgrade-button"
+            />
+          </Card>
+        )}
+
+        {ent.isPro && (
           <Button
-            label={user?.tier === 'pro' ? 'Manage subscription' : 'Upgrade to Pro'}
-            icon="crown-outline"
+            label="Manage subscription"
+            variant="ghost"
+            icon="cog-outline"
             onPress={() => router.push('/paywall')}
-            style={{ marginTop: 12 }}
-            testID="upgrade-button"
+            style={{ marginTop: 8 }}
+            testID="manage-subscription-button"
           />
-        </Card>
+        )}
         <View style={styles.accountInfo}>
           <AppText size={13} color={c.muted}>{user?.email}</AppText>
         </View>
@@ -520,6 +550,15 @@ const useStyles = makeStyles((t) => ({
   achFill: { height: '100%', backgroundColor: t.colors.brand, borderRadius: 2 },
 
   // Account
+  planStatus: {
+    flexDirection: 'row', alignItems: 'center', gap: t.spacing.md,
+    backgroundColor: t.colors.surfaceSecondary, borderRadius: t.radius.md,
+    borderWidth: 1, borderColor: t.colors.border, padding: t.spacing.lg, marginBottom: t.spacing.sm,
+  },
+  planStatusIcon: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#FBF3E2',
+    alignItems: 'center', justifyContent: 'center',
+  },
   proCard: { borderColor: t.colors.brandSecondary },
   proHead: { flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm },
   accountInfo: { marginTop: t.spacing.md },
