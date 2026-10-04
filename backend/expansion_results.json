@@ -1,0 +1,974 @@
+{
+  "timestamp": "2026-10-04T14:16:32.281374+00:00",
+  "stats": {
+    "generated": 143,
+    "ingested_created": 136,
+    "ingested_exists": 0,
+    "ingested_rejected": 7,
+    "generation_failed": 2069,
+    "batches": 150
+  },
+  "confusion_updates": 0,
+  "resolve_stats": {
+    "scanned": 597,
+    "updated": 0,
+    "self_removed": 0,
+    "duplicates_removed": 0,
+    "resolved": 426,
+    "unresolved": 3601
+  },
+  "words_created": [
+    {
+      "headword": "today",
+      "id": "today",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "train",
+      "id": "train",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "tree",
+      "id": "tree",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "walk",
+      "id": "walk",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "wall",
+      "id": "wall",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "watch",
+      "id": "watch",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "water",
+      "id": "water",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "week",
+      "id": "week",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "white",
+      "id": "white",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "wife",
+      "id": "wife",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "window",
+      "id": "window",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "woman",
+      "id": "woman",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "work",
+      "id": "work",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "write",
+      "id": "write",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "year",
+      "id": "year",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A1"
+    },
+    {
+      "headword": "lift",
+      "id": "lift",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "list",
+      "id": "list",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "loud",
+      "id": "loud",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "low",
+      "id": "low",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "luck",
+      "id": "luck",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "machine",
+      "id": "machine",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "magazine",
+      "id": "magazine",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "main",
+      "id": "main",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "map",
+      "id": "map",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "marry",
+      "id": "marry",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "meal",
+      "id": "meal",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "mean",
+      "id": "mean",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "meet",
+      "id": "meet",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "middle",
+      "id": "middle",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "mind",
+      "id": "mind",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "wind",
+      "id": "wind",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "wish",
+      "id": "wish",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "wonder",
+      "id": "wonder",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "wood",
+      "id": "wood",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "wool",
+      "id": "wool",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "word",
+      "id": "word",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "world",
+      "id": "world",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "wrong",
+      "id": "wrong",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "A2"
+    },
+    {
+      "headword": "context",
+      "id": "context",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "contract",
+      "id": "contract",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "contrast",
+      "id": "contrast",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "contribute",
+      "id": "contribute",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "control",
+      "id": "control",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "convenient",
+      "id": "convenient",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "convention",
+      "id": "convention",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "conversation",
+      "id": "conversation",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "convince",
+      "id": "convince",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "cope",
+      "id": "cope",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "core",
+      "id": "core",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "corporate",
+      "id": "corporate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "council",
+      "id": "council",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "courage",
+      "id": "courage",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "crash",
+      "id": "crash",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "reduce",
+      "id": "reduce",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "reflect",
+      "id": "reflect",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "regime",
+      "id": "regime",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "relevant",
+      "id": "relevant",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "relief",
+      "id": "relief",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "religion",
+      "id": "religion",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "rely",
+      "id": "rely",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "remote",
+      "id": "remote",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "remove",
+      "id": "remove",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "renew",
+      "id": "renew",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "replace",
+      "id": "replace",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B1"
+    },
+    {
+      "headword": "abolish",
+      "id": "abolish",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "absorb",
+      "id": "absorb",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "abundance",
+      "id": "abundance",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "accessible",
+      "id": "accessible",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "accumulate",
+      "id": "accumulate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "accustom",
+      "id": "accustom",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "acquaintance",
+      "id": "acquaintance",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "acute",
+      "id": "acute",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "adhere",
+      "id": "adhere",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "adjacent",
+      "id": "adjacent",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "administration",
+      "id": "administration",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "adverse",
+      "id": "adverse",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "aesthetic",
+      "id": "aesthetic",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "affiliation",
+      "id": "affiliation",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "fiscal",
+      "id": "fiscal",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "flaw",
+      "id": "flaw",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "flee",
+      "id": "flee",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "fluctuate",
+      "id": "fluctuate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "forbid",
+      "id": "forbid",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "forge",
+      "id": "forge",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "formidable",
+      "id": "formidable",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "forthcoming",
+      "id": "forthcoming",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "foster",
+      "id": "foster",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "fraction",
+      "id": "fraction",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "fragile",
+      "id": "fragile",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "fraud",
+      "id": "fraud",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "friction",
+      "id": "friction",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "frontier",
+      "id": "frontier",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "fulfillment",
+      "id": "fulfillment",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "procurement",
+      "id": "procurement",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "profound",
+      "id": "profound",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "prohibit",
+      "id": "prohibit",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "projection",
+      "id": "projection",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "prominent",
+      "id": "prominent",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "prone",
+      "id": "prone",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "propaganda",
+      "id": "propaganda",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "prosecute",
+      "id": "prosecute",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "prospective",
+      "id": "prospective",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "provincial",
+      "id": "provincial",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "provision",
+      "id": "provision",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "provoke",
+      "id": "provoke",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "proximity",
+      "id": "proximity",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "quota",
+      "id": "quota",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "radical",
+      "id": "radical",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "B2"
+    },
+    {
+      "headword": "broach",
+      "id": "broach",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "bureaucratic",
+      "id": "bureaucratic",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "burgeon",
+      "id": "burgeon",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "calibrate",
+      "id": "calibrate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "capitulate",
+      "id": "capitulate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "catapult",
+      "id": "catapult",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "caustic",
+      "id": "caustic",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "circumscribe",
+      "id": "circumscribe",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "clandestine",
+      "id": "clandestine",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "clemency",
+      "id": "clemency",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "coalesce",
+      "id": "coalesce",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "coerce",
+      "id": "coerce",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "cogent",
+      "id": "cogent",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "collaborate",
+      "id": "collaborate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C1"
+    },
+    {
+      "headword": "discrepancy",
+      "id": "discrepancy",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "disingenuous",
+      "id": "disingenuous",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "disquisition",
+      "id": "disquisition",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "dissolution",
+      "id": "dissolution",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "doctrinaire",
+      "id": "doctrinaire",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "ebullient",
+      "id": "ebullient",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "eclectic",
+      "id": "eclectic",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "edification",
+      "id": "edification",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "effervescent",
+      "id": "effervescent",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "egregious",
+      "id": "egregious",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "elegiac",
+      "id": "elegiac",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "elocution",
+      "id": "elocution",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "emanate",
+      "id": "emanate",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    },
+    {
+      "headword": "emancipation",
+      "id": "emancipation",
+      "status": "REVIEW",
+      "action": "created",
+      "level": "C2"
+    }
+  ]
+}

@@ -59,13 +59,14 @@ def _imports():
 
 
 COMMANDS = {
-    "canonical":      "migrate_canonical()    — upgrade all words to canonical schema v1",
-    "lifecycle":      "migrate_content_lifecycle() — standardise provenance + lifecycle_version",
-    "resolve_refs":   "resolve_all_relationship_refs() — resolve relation headword→id pointers",
-    "all":            "run canonical → lifecycle → resolve_refs in sequence",
-    "reconcile":      "reconcile_and_sync — compare Mongo vs Supabase; sync missing records",
-    "inspect_outbox": "show unresolved dual-write outbox entries",
-    "retry_outbox":   "retry failed Supabase mirror writes from the outbox",
+    "canonical":        "migrate_canonical()    — upgrade all words to canonical schema v1",
+    "lifecycle":        "migrate_content_lifecycle() — standardise provenance + lifecycle_version",
+    "resolve_refs":     "resolve_all_relationship_refs() — resolve relation headword→id pointers",
+    "all":              "run canonical → lifecycle → resolve_refs in sequence",
+    "promote_reviewed": "promote validated REVIEW words to PUBLISHED (post-expansion)",
+    "reconcile":        "reconcile_and_sync — compare Mongo vs Supabase; sync missing records",
+    "inspect_outbox":   "show unresolved dual-write outbox entries",
+    "retry_outbox":     "retry failed Supabase mirror writes from the outbox",
 }
 
 HELP = f"""
@@ -109,6 +110,41 @@ async def run(cmd: str) -> None:
         print("[maintenance] Running resolve_all_relationship_refs() …")
         stats = await resolve_all_relationship_refs(repo)
         print(f"[maintenance] resolve_all_relationship_refs() → {stats} in {time.perf_counter()-t:.1f}s")
+
+    if cmd == "promote_reviewed":
+        t = time.perf_counter()
+        print("[maintenance] Promoting validated REVIEW words to PUBLISHED …")
+        from content_validation import validate_word
+        from vocab_schema import normalize_headword
+
+        # Load context for validation
+        all_words = await repo.load_all_words_full()
+        id_by_key = {}
+        for w in all_words:
+            k = normalize_headword(w.get("headword", ""))
+            if k and k not in id_by_key:
+                id_by_key[k] = w["id"]
+        known_ids = set(id_by_key.values())
+        exam_slugs = await repo.get_exam_slugs()
+
+        review_words = [w for w in all_words if w.get("status") == "REVIEW"]
+        promoted = 0
+        skipped = 0
+        for w in review_words:
+            res = validate_word(
+                w, id_by_key=id_by_key, known_word_ids=known_ids,
+                known_exam_slugs=exam_slugs, existing_id=w["id"],
+            )
+            if res.valid:
+                await repo.update_word(w["id"], {"status": "PUBLISHED"})
+                promoted += 1
+            else:
+                skipped += 1
+                if skipped <= 5:
+                    errs = [e["code"] for e in res.errors[:3]]
+                    print(f"  SKIPPED {w.get('headword')}: {errs}")
+        print(f"[maintenance] promote_reviewed: {promoted} promoted, {skipped} skipped"
+              f" in {time.perf_counter()-t:.1f}s")
 
     if cmd == "reconcile":
         t = time.perf_counter()
