@@ -25,7 +25,7 @@ from vocab_schema import (  # noqa: E402
     new_canonical_word,
 )
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vocabist-state.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vocabist-audit.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 
