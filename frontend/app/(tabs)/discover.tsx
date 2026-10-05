@@ -16,7 +16,8 @@ import { api } from '@/src/api/client';
 
 const CEFR = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 const PAGE_SIZE = 25;
-const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 350;
+const SEMANTIC_MIN_LENGTH = 3;
 
 type Topic = { slug: string; name: string; icon: string; word_count: number; description?: string };
 type Exam = { slug: string; name: string; description?: string; active?: boolean; word_count?: number };
@@ -64,10 +65,37 @@ export default function Discover() {
   }, [filtersKey]);
 
   const filtering = debouncedSearch.trim().length > 0 || cefr !== 'All';
+  const isSemanticQuery = debouncedSearch.trim().length >= SEMANTIC_MIN_LENGTH;
 
   const topicsQ = useQuery({ queryKey: ['topics'], queryFn: () => api<{ topics: Topic[] }>('/topics'), staleTime: 10 * 60_000 });
   const examsQ = useQuery({ queryKey: ['exams'], queryFn: () => api<{ exams: Exam[] }>('/exams'), staleTime: 10 * 60_000 });
   const missionQ = useQuery({ queryKey: ['mission'], queryFn: () => api<Mission>('/mission'), staleTime: 2 * 60_000 });
+
+  // Hybrid search — uses semantic when query is long enough
+  type HybridResponse = { words: (WordRowItem & { match_type?: string; similarity?: number })[]; total: number; search_types?: string[]; semantic_available?: boolean };
+  
+  const hybridQ = useQuery({
+    queryKey: ['hybrid-search', debouncedSearch, cefr],
+    queryFn: async (): Promise<HybridResponse> => {
+      if (isSemanticQuery) {
+        const sp = new URLSearchParams({ q: debouncedSearch, limit: String(PAGE_SIZE) });
+        if (cefr !== 'All') sp.set('cefr', cefr);
+        try {
+          return await api<HybridResponse>(`/search/hybrid?${sp.toString()}`);
+        } catch {
+          // Fall back to regular search
+        }
+      }
+      // Regular exact search
+      const sp = new URLSearchParams({ limit: String(PAGE_SIZE), offset: '0' });
+      if (debouncedSearch) sp.set('search', debouncedSearch);
+      if (cefr !== 'All') sp.set('cefr', cefr);
+      const r = await api<WordsResponse>(`/words?${sp.toString()}`);
+      return { words: r.words, total: r.total, search_types: ['exact'], semantic_available: false };
+    },
+    enabled: filtering,
+    staleTime: 30_000,
+  });
 
   const wordsQ = useQuery({
     queryKey: ['words', debouncedSearch, cefr, offset],
@@ -78,23 +106,27 @@ export default function Discover() {
       return api<WordsResponse>(`/words?${sp.toString()}`);
     },
     placeholderData: keepPreviousData,
-    enabled: filtering,
+    enabled: filtering && !isSemanticQuery,
     staleTime: 60_000,
   });
 
   // Accumulate pages (dedupe by canonical id) so "Load more" grows the list.
   useEffect(() => {
-    if (!wordsQ.data) return;
+    if (!wordsQ.data || isSemanticQuery) return;
     setAccumulated((prev) => {
       if (wordsQ.data!.offset === 0) return wordsQ.data!.words;
       const seen = new Set(prev.map((w) => w.id));
       const next = wordsQ.data!.words.filter((w) => !seen.has(w.id));
       return [...prev, ...next];
     });
-  }, [wordsQ.data]);
+  }, [wordsQ.data, isSemanticQuery]);
 
-  const total = wordsQ.data?.total ?? 0;
-  const canLoadMore = filtering && accumulated.length < total && !wordsQ.isFetching;
+  const total = isSemanticQuery ? (hybridQ.data?.total ?? 0) : (wordsQ.data?.total ?? 0);
+  const canLoadMore = filtering && !isSemanticQuery && accumulated.length < total && !wordsQ.isFetching;
+
+  // Determine search types used
+  const searchTypes = hybridQ.data?.search_types ?? [];
+  const hasSemanticResults = searchTypes.includes('semantic');
 
   const toggleSave = async (w: WordRowItem) => {
     // Optimistic
@@ -120,7 +152,10 @@ export default function Discover() {
     setCefr('All');
   };
 
-  const results = filtering ? accumulated : [];
+  const results = filtering ? (isSemanticQuery ? (hybridQ.data?.words ?? []) : accumulated) : [];
+  const isSearchLoading = isSemanticQuery ? hybridQ.isLoading : wordsQ.isLoading;
+  const isSearchError = isSemanticQuery ? hybridQ.isError : wordsQ.isError;
+  const searchRefetch = isSemanticQuery ? hybridQ.refetch : wordsQ.refetch;
   const examsSorted = useMemo(
     () => (examsQ.data?.exams ?? []).slice().sort((a, b) => Number(!!b.active) - Number(!!a.active)),
     [examsQ.data],
@@ -187,14 +222,24 @@ export default function Discover() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={wordsQ.isRefetching && offset === 0}
+              refreshing={(isSemanticQuery ? hybridQ.isRefetching : wordsQ.isRefetching) && offset === 0}
               onRefresh={() => {
                 setOffset(0);
                 setAccumulated([]);
-                wordsQ.refetch();
+                searchRefetch();
               }}
               tintColor={colors.brand}
             />
+          }
+          ListHeaderComponent={
+            hasSemanticResults ? (
+              <View style={styles.semanticBadge}>
+                <Icon name="lightbulb-outline" size={14} color={colors.brand} />
+                <AppText size={12} weight="medium" color={colors.brand}>
+                  Meaning matches
+                </AppText>
+              </View>
+            ) : null
           }
           renderItem={({ item }) => (
             <WordRow
@@ -206,7 +251,7 @@ export default function Discover() {
             />
           )}
           ListFooterComponent={
-            !filtering ? null : wordsQ.isFetching && offset > 0 ? (
+            !filtering ? null : (isSearchLoading || (wordsQ.isFetching && offset > 0)) ? (
               <View style={{ paddingTop: 12, gap: 12 }}>
                 <Skeleton height={72} rounded={16} />
                 <Skeleton height={72} rounded={16} />
@@ -220,29 +265,29 @@ export default function Discover() {
                   onPress={() => setOffset(accumulated.length)}
                 />
               </View>
-            ) : accumulated.length > 0 && accumulated.length >= total ? (
+            ) : results.length > 0 && results.length >= total ? (
               <AppText size={12} color={colors.onSurfaceTertiary} style={styles.endOfList}>
-                That&apos;s everything matching this search.
+                {hasSemanticResults ? "These are the best meaning matches for your search." : "That's everything matching this search."}
               </AppText>
             ) : null
           }
           ListEmptyComponent={
-            wordsQ.isLoading ? (
+            isSearchLoading ? (
               <View style={{ gap: 12 }}>
                 {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={72} rounded={16} />)}
               </View>
-            ) : wordsQ.isError ? (
+            ) : isSearchError ? (
               <EmptyState
                 icon="alert-circle-outline"
                 title="Couldn't load results"
                 description="Check your connection and try again."
-                action={{ label: 'Retry', onPress: () => wordsQ.refetch(), testID: 'discover-retry' }}
+                action={{ label: 'Retry', onPress: () => searchRefetch(), testID: 'discover-retry' }}
               />
             ) : (
               <EmptyState
                 icon="magnify-close"
                 title="No words found"
-                description="Try another spelling or clear the level filter."
+                description={isSemanticQuery ? "Try a different description or search by exact word." : "Try another spelling or clear the level filter."}
                 action={{ label: 'Clear filters', onPress: clearFilters, testID: 'discover-clear-filters' }}
               />
             )
@@ -440,4 +485,16 @@ const useStyles = makeStyles((t) => ({
   },
 
   endOfList: { textAlign: 'center', paddingVertical: t.spacing.md },
+
+  semanticBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: t.spacing.sm,
+    paddingHorizontal: t.spacing.md,
+    paddingVertical: 6,
+    backgroundColor: t.colors.brandTertiary,
+    borderRadius: t.radius.pill,
+    alignSelf: 'flex-start',
+  },
 }));

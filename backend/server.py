@@ -28,7 +28,7 @@ from vocab_schema import (
     normalize_headword,
     to_canonical_storage,
 )
-from content_ingest import ingest_word, migrate_content_lifecycle, migrate_canonical
+from content_ingest import ingest_word, migrate_content_lifecycle, migrate_canonical, bulk_ingest
 from graph_service import build_word_graph, resolve_all_relationship_refs
 from db import get_db
 
@@ -1322,6 +1322,112 @@ async def practice_build(body: BuildBody, user: dict = Depends(get_current_user)
 @api.get("/")
 async def root():
     return {"service": "vocabist", "status": "ok"}
+
+# ---------------------------------------------------------------------------
+# Semantic Search — hybrid exact + semantic (student-facing)
+# ---------------------------------------------------------------------------
+
+@api.get("/search/hybrid")
+async def hybrid_search(
+    q: str = Query(..., min_length=1),
+    cefr: Optional[str] = None,
+    limit: int = Query(20, le=50),
+    user: dict = Depends(get_current_user),
+):
+    """Hybrid search: exact text + semantic meaning search."""
+    from ai.tasks.semantic_search import hybrid_search as do_hybrid_search
+    try:
+        result = await do_hybrid_search(
+            repo, q.strip(), limit=limit, cefr=cefr, user_id=user["user_id"],
+        )
+        # Attach saved status
+        saved_ids = await repo.get_saved_word_ids(user["user_id"])
+        prog = {p["word_id"]: p.get("status", "NEW")
+                for p in await repo.get_all_progress(user["user_id"])}
+        for w in result.get("words", []):
+            w["saved"] = w.get("id", "") in saved_ids
+            w["progress_status"] = prog.get(w.get("id", ""), "NEW")
+        return result
+    except Exception as e:
+        # If semantic fails, fall back to pure text search
+        total, words = await repo.list_words(q, None, cefr, None, 0, limit)
+        saved_ids = await repo.get_saved_word_ids(user["user_id"])
+        for w in words:
+            w["saved"] = w["id"] in saved_ids
+        return {"words": words, "total": total, "search_types": ["exact"], "semantic_available": False}
+
+
+# ---------------------------------------------------------------------------
+# Visual Capture — image → vocabulary extraction (student-facing)
+# ---------------------------------------------------------------------------
+
+@api.post("/visual-capture/extract")
+async def visual_capture_extract(
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Extract vocabulary from an image using Muse Glimmer through the AI Gateway."""
+    from ai.tasks.multimodal import extract_from_image
+    from ai.errors import AIError as _AIError
+
+    image = str(payload.get("image", "")).strip()
+    if not image.startswith("data:image"):
+        raise HTTPException(status_code=400, detail="Image must be a data URL")
+
+    max_words = min(int(payload.get("max_words", 15)), 30)
+    instruction = str(payload.get("instruction", ""))
+
+    try:
+        out = await extract_from_image(
+            image, max_words=max_words, instruction=instruction,
+        )
+    except _AIError:
+        raise HTTPException(status_code=502, detail="Visual extraction is temporarily unavailable")
+
+    entries = out.get("entries", [])
+
+    # Check which words already exist
+    if entries:
+        existing_headwords = {w.get("headword", "").lower() for w in await repo.load_all_words_minimal()}
+        candidates = []
+        for entry in entries:
+            hw = (entry.get("headword") or "").strip().lower()
+            if not hw:
+                continue
+            entry["already_exists"] = hw in existing_headwords
+            # Try to find existing word id
+            if entry["already_exists"]:
+                existing_word = await repo.get_word_by_headword(hw)
+                if existing_word:
+                    entry["existing_id"] = existing_word["id"]
+            candidates.append(entry)
+    else:
+        candidates = []
+
+    return {
+        "candidates": candidates,
+        "total_extracted": len(candidates),
+        "model": out.get("model_key"),
+        "provider": out.get("provider"),
+    }
+
+
+@api.post("/visual-capture/import")
+async def visual_capture_import(
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Import selected visual capture candidates into the vocabulary bank.
+    All go to REVIEW status (never auto-published)."""
+    words = payload.get("words", [])
+    if not words:
+        raise HTTPException(status_code=400, detail="No words to import")
+
+    results = await bulk_ingest(repo, words, provenance="AI_GENERATED")
+    await repo.log_event(user["user_id"], "visual_capture_imported", {
+        "count": results.get("created", 0),
+    })
+    return results
 
 # ---------------------------------------------------------------------------
 # startup: indexes + seed

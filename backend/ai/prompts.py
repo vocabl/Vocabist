@@ -154,14 +154,21 @@ MULTIMODAL_EXTRACT_V1 = "MULTIMODAL_EXTRACT_V1"
 def multimodal_extract_system() -> str:
     return (
         "You extract study-worthy English vocabulary from an image (a textbook page, "
-        "screenshot, chart or document). Return ONLY valid minified JSON. No commentary."
+        "screenshot, chart, document, or study material). Focus on meaningful, "
+        "difficult, academic, and exam-relevant vocabulary. "
+        "Avoid names, URLs, numbers, common function words, and OCR noise. "
+        "Return ONLY valid minified JSON. No commentary."
     )
 
 
 def multimodal_extract_prompt(max_words: int = 15) -> str:
     return (
         f"Look at the image and extract up to {max_words} useful English vocabulary words a "
-        "learner should study. For each, give an accurate short definition and the CEFR level.\n"
+        "learner should study. Prioritize meaningful, difficult, academic, or exam-relevant words. "
+        "For each word provide: an accurate short definition, CEFR level, part of speech, "
+        "the context where you found it, your confidence (high/medium/low), and why it's worth studying.\n"
         'Return ONLY JSON: {"words":[{"headword":"word","cefr":"B2",'
-        '"simple_definition":"...","example":"...","part_of_speech":"noun"}]}'
+        '"simple_definition":"clear definition","example":"natural example sentence",'
+        '"part_of_speech":"noun","detected_context":"the sentence or context from the image",'
+        '"confidence":"high","reason":"why this word is worth studying"}]}'
     )

@@ -62,6 +62,16 @@ export default function Learn() {
         </Card>
       </View>
 
+      <View style={styles.featureRow}>
+        <Card style={[styles.featureCard, { width: '100%' }]} onPress={() => router.push('/visual-capture')} testID="visual-capture-card">
+          <View style={[styles.topicIcon, { backgroundColor: '#EDE7F6' }]}>
+            <Icon name="camera-outline" size={22} color="#7E57C2" />
+          </View>
+          <AppText weight="medium" size={15} style={{ marginTop: 10 }}>Capture Words</AppText>
+          <AppText size={12} color={colors.muted} style={{ marginTop: 2 }}>Scan textbook pages or notes</AppText>
+        </Card>
+      </View>
+
       <AppText weight="medium" size={16} style={styles.section}>Practice by topic</AppText>
       {topicsQ.isLoading ? (
         <View style={{ gap: 12 }}>

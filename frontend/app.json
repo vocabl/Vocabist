@@ -11,12 +11,15 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.vocably.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Scan textbook pages to extract vocabulary",
+        "NSPhotoLibraryUsageDescription": "Select study material images for word extraction"
       }
     },
     "android": {
       "package": "com.vocably.app",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
     },
     "web": {
       "bundler": "metro",
@@ -27,6 +30,7 @@
       "expo-font",
       "expo-secure-store",
       "expo-web-browser",
+      "expo-image-picker",
       [
         "expo-splash-screen",
         {

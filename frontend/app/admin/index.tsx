@@ -21,11 +21,15 @@ function StatBox({ value, label, color }: { value: number | string; label: strin
 }
 
 const NAV = [
-  { href: '/admin/review', icon: 'clipboard-check-outline', title: 'Review Queue', sub: 'Approve AI-generated words' },
-  { href: '/admin/jobs', icon: 'cog-sync-outline', title: 'Generation Jobs', sub: 'Create & monitor AI jobs' },
-  { href: '/admin/models', icon: 'chip', title: 'Providers & Models', sub: 'NVIDIA + Emergent' },
-  { href: '/admin/routing', icon: 'call-split', title: 'Task Routing', sub: 'Model routing & fallback' },
-  { href: '/admin/usage', icon: 'chart-line', title: 'AI Usage', sub: 'Requests, latency, fallback' },
+  // Vocabulary
+  { href: '/admin/review', icon: 'clipboard-check-outline', title: 'Review Queue', sub: 'Approve AI-generated words', section: 'Vocabulary' },
+  { href: '/admin/jobs', icon: 'cog-sync-outline', title: 'Vocabulary Generator', sub: 'Bulk AI generation & jobs', section: 'Vocabulary' },
+  { href: '/admin/embeddings', icon: 'vector-combine', title: 'Embeddings', sub: 'Semantic search vectors', section: 'Vocabulary' },
+  // AI
+  { href: '/admin/insights', icon: 'chart-timeline-variant-shimmer', title: 'Model Insights', sub: 'Performance, latency, quality', section: 'AI' },
+  { href: '/admin/models', icon: 'chip', title: 'Providers & Models', sub: 'NVIDIA + Emergent', section: 'AI' },
+  { href: '/admin/routing', icon: 'call-split', title: 'Task Routing', sub: 'Model routing & fallback', section: 'AI' },
+  { href: '/admin/usage', icon: 'chart-line', title: 'AI Usage', sub: 'Requests, tokens, events', section: 'AI' },
 ] as const;
 
 export default function AdminDashboard() {
@@ -87,19 +91,23 @@ export default function AdminDashboard() {
           </Card>
 
           {/* Navigation */}
-          <AppText weight="medium" size={15} style={styles.sectionTitle}>Manage</AppText>
-          <View style={{ gap: 8 }}>
-            {NAV.map((n) => (
-              <Card key={n.href} onPress={() => router.push(n.href as any)} style={boxStyles.navCard} testID={`admin-nav-${n.title}`}>
-                <View style={boxStyles.navIcon}><Icon name={n.icon as any} size={20} color={c.brand} /></View>
-                <View style={{ flex: 1 }}>
-                  <AppText weight="medium" size={15}>{n.title}</AppText>
-                  <AppText size={12} color={c.muted}>{n.sub}</AppText>
-                </View>
-                <Icon name="chevron-right" size={20} color={c.muted} />
-              </Card>
-            ))}
-          </View>
+          {['Vocabulary', 'AI'].map((section) => (
+            <React.Fragment key={section}>
+              <AppText weight="medium" size={15} style={styles.sectionTitle}>{section}</AppText>
+              <View style={{ gap: 8 }}>
+                {NAV.filter((n) => n.section === section).map((n) => (
+                  <Card key={n.href} onPress={() => router.push(n.href as any)} style={boxStyles.navCard} testID={`admin-nav-${n.title}`}>
+                    <View style={boxStyles.navIcon}><Icon name={n.icon as any} size={20} color={c.brand} /></View>
+                    <View style={{ flex: 1 }}>
+                      <AppText weight="medium" size={15}>{n.title}</AppText>
+                      <AppText size={12} color={c.muted}>{n.sub}</AppText>
+                    </View>
+                    <Icon name="chevron-right" size={20} color={c.muted} />
+                  </Card>
+                ))}
+              </View>
+            </React.Fragment>
+          ))}
         </>
       )}
     </ScrollView>

@@ -811,3 +811,165 @@ class SupabaseRepository(DatabaseRepository):
         end = offset + limit - 1
         r = await q.order("created_at", desc=True).range(offset, end).execute()
         return (r.count or 0), _normalize_docs(r.data or [])
+
+
+    # ------------------------------------------------------------------ #
+    # EMBEDDINGS — pgvector semantic search
+    # ------------------------------------------------------------------ #
+    async def get_word_embedding(
+        self, word_id: str, model: str, version: str
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            sb = await self._client()
+            r = await sb.table("word_embeddings").select(
+                "word_id,embedding_model,embedding_version,content_hash"
+            ).eq("word_id", word_id).eq(
+                "embedding_model", model
+            ).eq("embedding_version", version).maybe_single().execute()
+            return r.data if r is not None else None
+        except Exception:
+            return None
+
+    async def upsert_word_embedding(
+        self, word_id: str, embedding: list, model: str, version: str, hash_val: str
+    ) -> None:
+        sb = await self._client()
+        # Convert embedding list to string format for pgvector
+        vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
+        await sb.table("word_embeddings").upsert({
+            "word_id": word_id,
+            "embedding": vec_str,
+            "embedding_model": model,
+            "embedding_version": version,
+            "content_hash": hash_val,
+            "updated_at": _now().isoformat(),
+        }, on_conflict="word_id,embedding_model,embedding_version").execute()
+
+    async def get_embedded_word_ids(self, model: str, version: str) -> set:
+        try:
+            sb = await self._client()
+            r = await sb.table("word_embeddings").select("word_id").eq(
+                "embedding_model", model
+            ).eq("embedding_version", version).execute()
+            return {d["word_id"] for d in (r.data or [])}
+        except Exception:
+            return set()
+
+    async def get_all_embedding_hashes(
+        self, model: str, version: str
+    ) -> List[Dict[str, Any]]:
+        try:
+            sb = await self._client()
+            r = await sb.table("word_embeddings").select(
+                "word_id,content_hash"
+            ).eq("embedding_model", model).eq("embedding_version", version).execute()
+            return r.data or []
+        except Exception:
+            return []
+
+    async def get_embedding_stats(
+        self, model: str = "nemotron-embed", version: str = "v1"
+    ) -> Dict[str, Any]:
+        """Get embedding coverage stats."""
+        try:
+            sb = await self._client()
+            total_pub = await self.count_words_by_status("PUBLISHED")
+            r = await sb.table("word_embeddings").select(
+                "word_id", count="exact"
+            ).eq("embedding_model", model).eq("embedding_version", version).execute()
+            embedded = r.count or 0
+            return {
+                "total_published": total_pub,
+                "embedded": embedded,
+                "missing": max(0, total_pub - embedded),
+                "coverage_percent": round(embedded / total_pub * 100, 1) if total_pub else 0,
+                "embedding_model": model,
+                "embedding_version": version,
+            }
+        except Exception:
+            return {
+                "total_published": 0, "embedded": 0, "missing": 0,
+                "coverage_percent": 0, "embedding_model": model,
+                "embedding_version": version, "error": "word_embeddings table not available",
+            }
+
+    async def semantic_search(
+        self,
+        query_vector: list,
+        *,
+        threshold: float = 0.3,
+        limit: int = 20,
+        cefr: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Perform vector similarity search using the match_word_embeddings RPC."""
+        try:
+            sb = await self._client()
+            vec_str = "[" + ",".join(str(v) for v in query_vector) + "]"
+            r = await sb.rpc("match_word_embeddings", {
+                "query_embedding": vec_str,
+                "match_threshold": threshold,
+                "match_count": limit,
+            }).execute()
+            word_ids = [d["word_id"] for d in (r.data or [])]
+            sims = {d["word_id"]: d["similarity"] for d in (r.data or [])}
+            if not word_ids:
+                return []
+            # Fetch full word data
+            words = await self.find_words_by_ids(word_ids)
+            # Filter by cefr if specified
+            if cefr:
+                words = [w for w in words if w.get("cefr") == cefr]
+            # Attach similarity scores and sort
+            for w in words:
+                w["similarity"] = sims.get(w["id"], 0)
+            words.sort(key=lambda w: -w.get("similarity", 0))
+            return words
+        except Exception:
+            return []
+
+    async def delete_word_embedding(self, word_id: str) -> None:
+        try:
+            sb = await self._client()
+            await sb.table("word_embeddings").delete().eq("word_id", word_id).execute()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ #
+    # EMBEDDING JOBS (Supabase-backed)
+    # ------------------------------------------------------------------ #
+    async def create_embedding_job(self, job: Dict[str, Any]) -> None:
+        try:
+            sb = await self._client()
+            clean = _serialize_doc(job)
+            await sb.table("embedding_jobs").insert(clean).execute()
+        except Exception:
+            pass
+
+    async def update_embedding_job(self, job_id: str, patch: Dict[str, Any]) -> None:
+        try:
+            sb = await self._client()
+            await sb.table("embedding_jobs").update(
+                _serialize_doc(patch)
+            ).eq("id", job_id).execute()
+        except Exception:
+            pass
+
+    async def get_embedding_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            sb = await self._client()
+            r = await sb.table("embedding_jobs").select("*").eq(
+                "id", job_id
+            ).maybe_single().execute()
+            return _normalize_doc(r.data if r is not None else None)
+        except Exception:
+            return None
+
+    async def list_embedding_jobs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        try:
+            sb = await self._client()
+            r = await sb.table("embedding_jobs").select("*").order(
+                "created_at", desc=True
+            ).limit(limit).execute()
+            return _normalize_docs(r.data or [])
+        except Exception:
+            return []

@@ -88,6 +88,25 @@ export const adminApi = {
   reject: (id: string, reason?: string) => api(`/admin/vocabulary/${id}/reject`, { method: 'POST', body: { reason } }),
   translate: (text: string, target_language: string, model?: string) =>
     api<{ translation: string; model_key: string }>('/admin/ai/translate', { method: 'POST', body: { text, target_language, model } }),
+  // Bulk operations
+  bulkGenerate: (body: any) => api('/admin/vocabulary/bulk-generate', { method: 'POST', body }),
+  bulkApprove: (body: any) => api('/admin/vocabulary/bulk-approve', { method: 'POST', body }),
+  bulkReject: (body: any) => api('/admin/vocabulary/bulk-reject', { method: 'POST', body }),
+  // Embeddings
+  embeddingStatus: () => api('/admin/embeddings/status'),
+  createEmbeddingJob: (body: any) => api('/admin/embeddings/jobs', { method: 'POST', body }),
+  listEmbeddingJobs: () => api<{ jobs: any[] }>('/admin/embeddings/jobs'),
+  // Model Insights
+  insights: (params?: { model?: string; task?: string; days?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.model) sp.set('model', params.model);
+    if (params?.task) sp.set('task', params.task);
+    if (params?.days) sp.set('days', String(params.days));
+    const qs = sp.toString();
+    return api<any>(`/admin/ai/insights${qs ? `?${qs}` : ''}`);
+  },
+  // Visual extract (admin)
+  visualExtract: (body: any) => api('/admin/ai/multimodal/extract', { method: 'POST', body }),
 };
 
 export function useIsAdmin() {

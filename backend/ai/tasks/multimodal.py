@@ -12,14 +12,20 @@ from .. import prompts
 from ..gateway import gateway
 from ..schemas import Task
 
-_ALLOWED = {"headword", "cefr", "simple_definition", "example", "part_of_speech"}
+_ALLOWED = {
+    "headword", "cefr", "simple_definition", "example", "part_of_speech",
+    "detected_context", "confidence", "reason",
+}
 
 
 def _clean(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
-    hw = str(raw.get("headword", "")).strip()
-    if not hw:
+    hw = str(raw.get("headword", "")).strip().lower()
+    if not hw or len(hw) < 2:
+        return None
+    # Filter out non-vocabulary items
+    if any(c.isdigit() for c in hw) and not hw.isalpha():
         return None
     out = {k: v for k, v in raw.items() if k in _ALLOWED and v is not None}
     out["headword"] = hw
@@ -30,6 +36,7 @@ def _clean(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 async def extract_from_image(
     image_data_url: str, *, max_words: int = 15, instruction: str = "",
     prefer_model: Optional[str] = None, admin_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     user_text = prompts.multimodal_extract_prompt(max_words)
     if instruction:
@@ -40,7 +47,7 @@ async def extract_from_image(
     ]
     res = await gateway.run_json(
         Task.MULTIMODAL_LEARNING, messages, images=[image_data_url], max_tokens=2000,
-        prefer_model=prefer_model, admin_id=admin_id,
+        prefer_model=prefer_model, admin_id=admin_id, user_id=user_id,
     )
     data = res.data
     rows = data.get("words") if isinstance(data, dict) else (data if isinstance(data, list) else [])

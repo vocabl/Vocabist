@@ -109,14 +109,15 @@ class ModelToggleBody(BaseModel):
 
 
 class GenerateBody(BaseModel):
-    count: int = Field(default=10, ge=1, le=200)
+    count: int = Field(default=10, ge=1, le=500)
     cefr: Optional[str] = None
     topic: Optional[str] = None
     part_of_speech: Optional[str] = None
     exam: Optional[str] = None
-    vocabulary_type: Optional[str] = None       # e.g. academic / everyday / idioms
+    vocabulary_type: Optional[str] = None       # e.g. academic / high-frequency / advanced / contextual
     model: Optional[str] = None                  # force a specific model key (Auto if None)
     enrichment_level: str = "standard"           # minimal | standard | rich
+    quality: str = "standard"                    # standard | high | maximum
 
 
 class RegenerateFieldBody(BaseModel):

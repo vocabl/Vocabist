@@ -23,6 +23,9 @@ from ai.schemas import (
 from ai.tasks import translation as t_translation
 from ai.tasks import embeddings as t_embeddings
 from ai.tasks import multimodal as t_multimodal
+from ai.tasks import semantic_search as t_semantic
+from ai import embedding_jobs
+from ai import insights as ai_insights
 from ai.errors import AIError
 from content_validation import validate_word
 from content_ingest import bulk_ingest
@@ -339,5 +342,140 @@ def build_admin_router(repo, get_current_user):
         entries = out.get("entries", [])
         ingest = await bulk_ingest(repo, entries, provenance="AI_GENERATED") if entries else {"created": 0}
         return {"extracted": len(entries), "ingested": ingest, "model": out.get("model_key")}
+
+    # ------------------------------------------------------------------ #
+    # EMBEDDINGS — Admin management
+    # ------------------------------------------------------------------ #
+    @router.get("/embeddings/status")
+    async def embedding_status(admin: dict = Depends(get_current_admin)):
+        stats = await repo.get_embedding_stats()
+        return stats
+
+    @router.post("/embeddings/jobs")
+    async def create_embedding_job(
+        payload: Dict[str, Any] = {},
+        admin: dict = Depends(get_current_admin),
+    ):
+        mode = payload.get("mode", "missing")
+        if mode not in ("missing", "stale", "all", "selected"):
+            raise HTTPException(status_code=400, detail="Invalid mode")
+        word_ids = payload.get("word_ids")
+        job = await embedding_jobs.create_embedding_job(
+            repo,
+            mode=mode,
+            word_ids=word_ids,
+            admin_id=admin["user_id"],
+        )
+        return job
+
+    @router.get("/embeddings/jobs")
+    async def list_embedding_jobs(admin: dict = Depends(get_current_admin)):
+        jobs_list = await repo.list_embedding_jobs(limit=50)
+        return {"jobs": jobs_list}
+
+    # ------------------------------------------------------------------ #
+    # MODEL INSIGHTS — enhanced analytics
+    # ------------------------------------------------------------------ #
+    @router.get("/ai/insights")
+    async def get_insights(
+        model: Optional[str] = None,
+        task: Optional[str] = None,
+        provider: Optional[str] = None,
+        days: int = 30,
+        admin: dict = Depends(get_current_admin),
+    ):
+        return await ai_insights.model_insights(
+            model_filter=model,
+            task_filter=task,
+            provider_filter=provider,
+            days=days,
+        )
+
+    # ------------------------------------------------------------------ #
+    # BULK VOCABULARY — enhanced generation with full config
+    # ------------------------------------------------------------------ #
+    @router.post("/vocabulary/bulk-generate")
+    async def bulk_generate(payload: Dict[str, Any], admin: dict = Depends(get_current_admin)):
+        count = int(payload.get("count", 10))
+        if count > 500:
+            raise HTTPException(status_code=400, detail="Maximum 500 words per job")
+        if count > 100:
+            # Require confirmation for large jobs
+            confirmed = payload.get("confirmed", False)
+            if not confirmed:
+                return {
+                    "requires_confirmation": True,
+                    "message": f"You are about to generate {count} vocabulary items. This will consume significant AI resources.",
+                    "count": count,
+                }
+        body = GenerateBody(
+            count=count,
+            cefr=payload.get("cefr"),
+            topic=payload.get("topic"),
+            part_of_speech=payload.get("part_of_speech"),
+            exam=payload.get("exam"),
+            vocabulary_type=payload.get("vocabulary_type"),
+            model=payload.get("model"),
+            enrichment_level=payload.get("enrichment_level", "standard"),
+        )
+        if body.cefr and body.cefr not in {"A1", "A2", "B1", "B2", "C1", "C2"}:
+            raise HTTPException(status_code=400, detail="Invalid CEFR")
+        if body.exam:
+            slugs = await repo.get_exam_slugs()
+            if body.exam not in slugs:
+                raise HTTPException(status_code=400, detail=f"Unknown exam '{body.exam}'")
+        job = await jobs.create_generation_job(repo, body.model_dump(), admin["user_id"])
+        return job
+
+    # ------------------------------------------------------------------ #
+    # BULK APPROVE / REJECT
+    # ------------------------------------------------------------------ #
+    @router.post("/vocabulary/bulk-approve")
+    async def bulk_approve(payload: Dict[str, Any], admin: dict = Depends(get_current_admin)):
+        word_ids = payload.get("word_ids", [])
+        if not word_ids:
+            raise HTTPException(status_code=400, detail="No word IDs provided")
+        if len(word_ids) > 100:
+            confirmed = payload.get("confirmed", False)
+            if not confirmed:
+                return {
+                    "requires_confirmation": True,
+                    "message": f"You are about to publish {len(word_ids)} words.",
+                    "count": len(word_ids),
+                }
+        results = {"published": 0, "failed": 0, "errors": []}
+        for wid in word_ids:
+            try:
+                w = await repo.get_word(wid)
+                if not w:
+                    results["failed"] += 1
+                    results["errors"].append({"id": wid, "error": "Not found"})
+                    continue
+                validation = await _validate(wid, w)
+                if not validation["valid"]:
+                    results["failed"] += 1
+                    results["errors"].append({"id": wid, "error": "Validation failed"})
+                    continue
+                await repo.update_word(wid, {"status": "PUBLISHED", "updated_at": _now_iso()})
+                results["published"] += 1
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append({"id": wid, "error": str(e)})
+        return results
+
+    @router.post("/vocabulary/bulk-reject")
+    async def bulk_reject(payload: Dict[str, Any], admin: dict = Depends(get_current_admin)):
+        word_ids = payload.get("word_ids", [])
+        reason = payload.get("reason", "Bulk rejected by admin")
+        if not word_ids:
+            raise HTTPException(status_code=400, detail="No word IDs provided")
+        results = {"rejected": 0, "failed": 0}
+        for wid in word_ids:
+            try:
+                await repo.update_word(wid, {"status": "ARCHIVED", "updated_at": _now_iso()})
+                results["rejected"] += 1
+            except Exception:
+                results["failed"] += 1
+        return results
 
     return router
