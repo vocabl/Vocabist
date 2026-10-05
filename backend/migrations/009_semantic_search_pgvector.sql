@@ -74,13 +74,13 @@ BEGIN
     RETURN QUERY
     SELECT
         we.word_id,
-        (1 - (we.embedding <=> query_embedding))::FLOAT AS similarity
+        (1 - (we.embedding OPERATOR(public.<=>) query_embedding))::FLOAT AS similarity
     FROM public.word_embeddings we
     JOIN public.words w ON w.id = we.word_id AND w.status = 'PUBLISHED'
     WHERE we.embedding_model = p_model
       AND we.embedding_version = p_version
-      AND (1 - (we.embedding <=> query_embedding)) > match_threshold
-    ORDER BY we.embedding <=> query_embedding
+      AND (1 - (we.embedding OPERATOR(public.<=>) query_embedding)) > match_threshold
+    ORDER BY we.embedding OPERATOR(public.<=>) query_embedding
     LIMIT match_count;
 END;
 $$;
