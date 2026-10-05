@@ -1,5 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, Pressable, Alert, ActivityIndicator, Image } from 'react-native';
+import {
+  View,
+  ScrollView,
+  Pressable,
+  Alert,
+  ActivityIndicator,
+  Image,
+} from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,6 +18,12 @@ import { Icon } from '@/src/components/Icon';
 import { useToast } from '@/src/components/Toast';
 import { api } from '@/src/api/client';
 
+type SimilarWord = {
+  id: string;
+  headword: string;
+  similarity: number;
+};
+
 type Candidate = {
   headword: string;
   simple_definition?: string;
@@ -21,8 +34,29 @@ type Candidate = {
   reason?: string;
   already_exists?: boolean;
   existing_id?: string;
+  match_type?: string;
+  similar_headword?: string;
+  similar_word?: SimilarWord;
   selected?: boolean;
 };
+
+type ExtractResponse = {
+  candidates: Candidate[];
+  total_extracted: number;
+  model?: string;
+  provider?: string;
+  fallback_used?: boolean;
+};
+
+/** Detect MIME from a file URI (best-effort). */
+function guessMime(uri: string): string {
+  const lower = uri.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.heic') || lower.endsWith('.heif')) return 'image/heic';
+  return 'image/jpeg';
+}
 
 export default function VisualCapture() {
   const styles = useStyles();
@@ -33,54 +67,90 @@ export default function VisualCapture() {
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [extracting, setExtracting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [extracted, setExtracted] = useState(false);
+  const [modelInfo, setModelInfo] = useState<string | null>(null);
+
+  /* ---------- image picker ---------- */
 
   const pickImage = useCallback(async (fromCamera: boolean) => {
     try {
-      const perm = fromCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      // Check current permission status first
+      const currentPerm = fromCamera
+        ? await ImagePicker.getCameraPermissionsAsync()
+        : await ImagePicker.getMediaLibraryPermissionsAsync();
 
-      if (!perm.granted) {
-        Alert.alert(
-          'Permission needed',
-          fromCamera ? 'Camera access is needed to capture study materials.' : 'Photo library access is needed to select study materials.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => {
-              Linking.openSettings();
-            }},
-          ]
-        );
-        return;
+      if (!currentPerm.granted) {
+        // If can't ask again, go straight to Settings
+        if (!currentPerm.canAskAgain && currentPerm.status !== 'undetermined') {
+          Alert.alert(
+            'Permission Required',
+            fromCamera
+              ? 'Camera access is needed to capture study materials. Please enable it in Settings.'
+              : 'Photo library access is needed to select study materials. Please enable it in Settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ],
+          );
+          return;
+        }
+
+        // Request permission
+        const perm = fromCamera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+        if (!perm.granted) {
+          Alert.alert(
+            'Permission Needed',
+            fromCamera
+              ? 'Camera access is needed to capture study materials.'
+              : 'Photo library access is needed to select study materials.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ],
+          );
+          return;
+        }
       }
 
       const result = fromCamera
         ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 })
-        : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7, mediaTypes: ['images'] });
+        : await ImagePicker.launchImageLibraryAsync({
+            base64: true,
+            quality: 0.7,
+            mediaTypes: ['images'],
+          });
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         setImageUri(asset.uri);
         setImageBase64(asset.base64 || null);
+        setImageMime(
+          asset.mimeType || guessMime(asset.uri),
+        );
         setCandidates([]);
         setExtracted(false);
+        setModelInfo(null);
       }
     } catch {
       toast.show('Could not open image picker', 'error');
     }
   }, [toast]);
 
+  /* ---------- extract ---------- */
+
   const extractWords = useCallback(async () => {
     if (!imageBase64) return;
     setExtracting(true);
     try {
-      const mimeType = 'image/jpeg';
-      const dataUrl = `data:${mimeType};base64,${imageBase64}`;
-      const res = await api<{ candidates: Candidate[]; total_extracted: number }>('/visual-capture/extract', {
+      const dataUrl = `data:${imageMime};base64,${imageBase64}`;
+      const res = await api<ExtractResponse>('/visual-capture/extract', {
         method: 'POST',
         body: { image: dataUrl, max_words: 20 },
       });
@@ -90,21 +160,32 @@ export default function VisualCapture() {
       }));
       setCandidates(withSelection);
       setExtracted(true);
+      if (res.model) setModelInfo(res.model);
       if (withSelection.length === 0) {
         toast.show('No vocabulary found in this image', 'info');
       }
     } catch (err: any) {
-      toast.show(err?.message || 'Extraction failed', 'error');
+      toast.show(err?.message || 'Extraction failed — try a clearer image', 'error');
     } finally {
       setExtracting(false);
     }
-  }, [imageBase64, toast]);
+  }, [imageBase64, imageMime, toast]);
+
+  /* ---------- toggle / select all ---------- */
 
   const toggleCandidate = useCallback((idx: number) => {
     setCandidates((prev) =>
-      prev.map((c, i) => (i === idx ? { ...c, selected: !c.selected } : c))
+      prev.map((c, i) => (i === idx ? { ...c, selected: !c.selected } : c)),
     );
   }, []);
+
+  const selectAll = useCallback((val: boolean) => {
+    setCandidates((prev) =>
+      prev.map((c) => (c.already_exists ? c : { ...c, selected: val })),
+    );
+  }, []);
+
+  /* ---------- import ---------- */
 
   const importSelected = useCallback(async () => {
     const selected = candidates.filter((c) => c.selected && !c.already_exists);
@@ -121,12 +202,17 @@ export default function VisualCapture() {
         part_of_speech: c.part_of_speech,
         example: c.detected_context,
       }));
-      const res = await api('/visual-capture/import', { method: 'POST', body: { words } });
-      toast.show(`${res.created || 0} words sent to review`, 'success');
+      const res = await api<{ created?: number }>('/visual-capture/import', {
+        method: 'POST',
+        body: { words },
+      });
+      toast.show(`${res.created || 0} words sent to review queue`, 'success');
+      // Reset state
       setCandidates([]);
       setImageUri(null);
       setImageBase64(null);
       setExtracted(false);
+      setModelInfo(null);
     } catch (err: any) {
       toast.show(err?.message || 'Import failed', 'error');
     } finally {
@@ -134,22 +220,31 @@ export default function VisualCapture() {
     }
   }, [candidates, toast]);
 
-  const selectedCount = candidates.filter((c) => c.selected && !c.already_exists).length;
+  /* ---------- derived ---------- */
+
+  const newCandidates = candidates.filter((c) => !c.already_exists);
+  const selectedCount = newCandidates.filter((c) => c.selected).length;
+  const existingCount = candidates.filter((c) => c.already_exists).length;
+
+  /* ---------- render ---------- */
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
-      {/* Header */}
+
+      {/* ---- Header ---- */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
           <Icon name="arrow-left" size={24} color={colors.onSurface} />
         </Pressable>
-        <AppText weight="semibold" size={18}>Capture Words</AppText>
+        <AppText weight="semibold" size={18}>
+          Capture Words
+        </AppText>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Image selection */}
+        {/* ---- Empty / picker state ---- */}
         {!imageUri ? (
           <View style={styles.pickSection}>
             <View style={styles.pickIcon}>
@@ -159,7 +254,8 @@ export default function VisualCapture() {
               Scan study material
             </AppText>
             <AppText size={14} color={colors.muted} style={{ marginTop: 6, textAlign: 'center' }}>
-              Take a photo or upload an image of a textbook page, notes, or any study material.
+              Take a photo or upload an image of a textbook page, notes, or any
+              study material.
             </AppText>
             <View style={styles.btnRow}>
               <Button
@@ -182,57 +278,99 @@ export default function VisualCapture() {
           </View>
         ) : (
           <>
-            {/* Preview */}
+            {/* ---- Image preview ---- */}
             <View style={styles.previewContainer}>
-              <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="cover" />
-              <Pressable style={styles.changeBtn} onPress={() => {
-                setImageUri(null);
-                setImageBase64(null);
-                setCandidates([]);
-                setExtracted(false);
-              }}>
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.previewImage}
+                resizeMode="cover"
+              />
+              <Pressable
+                style={styles.changeBtn}
+                onPress={() => {
+                  setImageUri(null);
+                  setImageBase64(null);
+                  setCandidates([]);
+                  setExtracted(false);
+                  setModelInfo(null);
+                }}
+              >
                 <Icon name="close" size={18} color={colors.onSurface} />
               </Pressable>
             </View>
 
+            {/* ---- Extract button ---- */}
             {!extracted && (
               <Button
                 testID="visual-extract"
-                label={extracting ? "Extracting vocabulary..." : "Extract vocabulary"}
+                label={extracting ? 'Analyzing image...' : 'Extract vocabulary'}
                 onPress={extractWords}
                 disabled={extracting}
                 variant="primary"
-                icon={extracting ? undefined : "text-search"}
+                icon={extracting ? undefined : 'text-search'}
               />
             )}
 
+            {/* ---- Loading indicator ---- */}
             {extracting && (
               <View style={styles.loadingBox}>
                 <ActivityIndicator color={colors.brand} size="small" />
-                <AppText size={13} color={colors.muted} style={{ marginTop: 8, textAlign: 'center' }}>
-                  Analyzing image for vocabulary...
+                <AppText
+                  size={13}
+                  color={colors.muted}
+                  style={{ marginTop: 8, textAlign: 'center' }}
+                >
+                  Analyzing image for vocabulary using AI...{'\n'}This may take a
+                  few seconds.
                 </AppText>
               </View>
             )}
 
-            {/* Results */}
+            {/* ---- Results ---- */}
             {extracted && candidates.length > 0 && (
               <>
                 <View style={styles.resultsHeader}>
-                  <AppText weight="semibold" size={16}>
-                    {candidates.length} words found
-                  </AppText>
+                  <View>
+                    <AppText weight="semibold" size={16}>
+                      {candidates.length} words found
+                    </AppText>
+                    {existingCount > 0 && (
+                      <AppText size={12} color={colors.muted}>
+                        {existingCount} already in Vocabist
+                      </AppText>
+                    )}
+                  </View>
                   <AppText size={13} color={colors.muted}>
-                    {selectedCount} selected for review
+                    {selectedCount} selected
                   </AppText>
                 </View>
 
+                {/* Select all / deselect all */}
+                {newCandidates.length > 1 && (
+                  <View style={styles.selectRow}>
+                    <Pressable
+                      onPress={() =>
+                        selectAll(selectedCount < newCandidates.length)
+                      }
+                      hitSlop={8}
+                    >
+                      <AppText size={13} color={colors.brand} weight="medium">
+                        {selectedCount === newCandidates.length
+                          ? 'Deselect all'
+                          : 'Select all new'}
+                      </AppText>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* ---- Candidate cards ---- */}
                 {candidates.map((c, idx) => (
                   <Pressable
                     key={`${c.headword}-${idx}`}
-                    onPress={() => c.already_exists && c.existing_id
-                      ? router.push(`/word/${c.existing_id}`)
-                      : toggleCandidate(idx)
+                    onPress={() =>
+                      c.already_exists && c.existing_id
+                        ? router.push(`/word/${c.existing_id}`)
+                        : toggleCandidate(idx)
                     }
                     style={[
                       styles.candidateCard,
@@ -241,43 +379,130 @@ export default function VisualCapture() {
                     ]}
                   >
                     <View style={styles.candidateRow}>
+                      {/* Checkbox for new words */}
                       {!c.already_exists && (
-                        <View style={[styles.checkbox, c.selected && styles.checkboxActive]}>
-                          {c.selected && <Icon name="check" size={14} color="#FFF" />}
+                        <View
+                          style={[
+                            styles.checkbox,
+                            c.selected && styles.checkboxActive,
+                          ]}
+                        >
+                          {c.selected && (
+                            <Icon name="check" size={14} color="#FFF" />
+                          )}
                         </View>
                       )}
+
                       <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <AppText weight="semibold" size={15}>{c.headword}</AppText>
+                        {/* Headword + badges */}
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 6,
+                          }}
+                        >
+                          <AppText weight="semibold" size={15}>
+                            {c.headword}
+                          </AppText>
                           {c.cefr && (
                             <View style={styles.cefrBadge}>
-                              <AppText size={10} weight="medium" color={colors.brand}>{c.cefr}</AppText>
+                              <AppText size={10} weight="medium" color={colors.brand}>
+                                {c.cefr}
+                              </AppText>
                             </View>
                           )}
                           {c.part_of_speech && (
-                            <AppText size={11} color={colors.muted}>{c.part_of_speech}</AppText>
+                            <AppText size={11} color={colors.muted}>
+                              {c.part_of_speech}
+                            </AppText>
                           )}
                         </View>
+
+                        {/* Definition */}
                         {c.simple_definition && (
-                          <AppText size={13} color={colors.muted} numberOfLines={2} style={{ marginTop: 3 }}>
+                          <AppText
+                            size={13}
+                            color={colors.muted}
+                            numberOfLines={2}
+                            style={{ marginTop: 3 }}
+                          >
                             {c.simple_definition}
                           </AppText>
                         )}
+
+                        {/* Source context */}
                         {c.detected_context && (
-                          <AppText size={11} color={colors.muted} numberOfLines={1} style={{ marginTop: 2, fontStyle: 'italic' }}>
+                          <AppText
+                            size={11}
+                            color={colors.muted}
+                            numberOfLines={1}
+                            style={{ marginTop: 2, fontStyle: 'italic' }}
+                          >
                             Context: {c.detected_context}
                           </AppText>
                         )}
+
+                        {/* Already exists badge */}
                         {c.already_exists && (
                           <View style={styles.existsBadge}>
                             <Icon name="check-circle" size={12} color={colors.success} />
-                            <AppText size={11} color={colors.success}>Already in Vocabist</AppText>
+                            <AppText size={11} color={colors.success}>
+                              Already in Vocabist
+                              {c.match_type === 'semantic' && c.similar_headword
+                                ? ` (matched: ${c.similar_headword})`
+                                : ''}
+                            </AppText>
+                            {c.existing_id && (
+                              <AppText size={11} color={colors.brand} weight="medium">
+                                {' '}
+                                — View →
+                              </AppText>
+                            )}
                           </View>
                         )}
+
+                        {/* Similar word hint (not a duplicate, but close) */}
+                        {!c.already_exists && c.similar_word && (
+                          <Pressable
+                            style={styles.similarBadge}
+                            onPress={() =>
+                              c.similar_word?.id &&
+                              router.push(`/word/${c.similar_word.id}`)
+                            }
+                          >
+                            <Icon name="link-variant" size={12} color={colors.warning} />
+                            <AppText size={11} color={colors.warning}>
+                              Similar to &ldquo;{c.similar_word.headword}&rdquo;
+                            </AppText>
+                          </Pressable>
+                        )}
                       </View>
+
+                      {/* Confidence badge */}
                       {c.confidence && (
-                        <View style={[styles.confBadge, c.confidence === 'high' ? styles.confHigh : c.confidence === 'medium' ? styles.confMed : styles.confLow]}>
-                          <AppText size={9} weight="medium" color={c.confidence === 'high' ? colors.success : c.confidence === 'medium' ? colors.warning : colors.error}>
+                        <View
+                          style={[
+                            styles.confBadge,
+                            c.confidence === 'high'
+                              ? styles.confHigh
+                              : c.confidence === 'medium'
+                                ? styles.confMed
+                                : styles.confLow,
+                          ]}
+                        >
+                          <AppText
+                            size={9}
+                            weight="medium"
+                            color={
+                              c.confidence === 'high'
+                                ? colors.success
+                                : c.confidence === 'medium'
+                                  ? colors.warning
+                                  : colors.error
+                            }
+                          >
                             {c.confidence.toUpperCase()}
                           </AppText>
                         </View>
@@ -286,25 +511,58 @@ export default function VisualCapture() {
                   </Pressable>
                 ))}
 
+                {/* ---- Import button ---- */}
                 {selectedCount > 0 && (
                   <Button
                     testID="visual-import"
-                    label={importing ? "Importing..." : `Send ${selectedCount} words to review`}
+                    label={
+                      importing
+                        ? 'Importing...'
+                        : `Send ${selectedCount} word${selectedCount > 1 ? 's' : ''} to review`
+                    }
                     onPress={importSelected}
                     disabled={importing}
                     variant="primary"
                     icon="check-all"
                   />
                 )}
+
+                {/* Model info */}
+                {modelInfo && (
+                  <AppText
+                    size={11}
+                    color={colors.muted}
+                    style={{ textAlign: 'center', marginTop: 4 }}
+                  >
+                    Extracted using {modelInfo}
+                  </AppText>
+                )}
               </>
             )}
 
+            {/* ---- Empty results ---- */}
             {extracted && candidates.length === 0 && (
               <View style={styles.emptyResults}>
                 <Icon name="text-search" size={32} color={colors.muted} />
-                <AppText size={14} color={colors.muted} style={{ marginTop: 8, textAlign: 'center' }}>
-                  No useful vocabulary found. Try a different image with more text content.
+                <AppText
+                  size={14}
+                  color={colors.muted}
+                  style={{ marginTop: 8, textAlign: 'center' }}
+                >
+                  No useful vocabulary found. Try a different image with more
+                  text content.
                 </AppText>
+                <Button
+                  label="Try another image"
+                  onPress={() => {
+                    setImageUri(null);
+                    setImageBase64(null);
+                    setExtracted(false);
+                    setModelInfo(null);
+                  }}
+                  variant="secondary"
+                  style={{ marginTop: 16 }}
+                />
               </View>
             )}
           </>
@@ -325,13 +583,21 @@ const useStyles = makeStyles((t) => ({
     borderBottomWidth: 1,
     borderBottomColor: t.colors.divider,
   },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   content: { padding: t.spacing.lg, paddingBottom: 40, gap: 16 },
   pickSection: { alignItems: 'center', paddingVertical: 40 },
   pickIcon: {
-    width: 80, height: 80, borderRadius: 40,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: t.colors.brandTertiary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' },
   previewContainer: {
@@ -341,16 +607,26 @@ const useStyles = makeStyles((t) => ({
   },
   previewImage: { width: '100%', height: 200, borderRadius: t.radius.lg },
   changeBtn: {
-    position: 'absolute', top: 8, right: 8,
-    width: 32, height: 32, borderRadius: 16,
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.9)',
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loadingBox: { alignItems: 'center', paddingVertical: 24 },
   resultsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+  },
+  selectRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: -8,
   },
   candidateCard: {
     backgroundColor: t.colors.surfaceSecondary,
@@ -360,23 +636,49 @@ const useStyles = makeStyles((t) => ({
     padding: t.spacing.md,
   },
   candidateExisting: { opacity: 0.7, borderColor: t.colors.borderStrong },
-  candidateSelected: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTertiary + '30' },
+  candidateSelected: {
+    borderColor: t.colors.brand,
+    backgroundColor: t.colors.brandTertiary + '30',
+  },
   candidateRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   checkbox: {
-    width: 22, height: 22, borderRadius: 6,
-    borderWidth: 2, borderColor: t.colors.border,
-    alignItems: 'center', justifyContent: 'center', marginTop: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: t.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
   },
-  checkboxActive: { backgroundColor: t.colors.brand, borderColor: t.colors.brand },
+  checkboxActive: {
+    backgroundColor: t.colors.brand,
+    borderColor: t.colors.brand,
+  },
   cefrBadge: {
-    paddingHorizontal: 6, paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     backgroundColor: t.colors.brandTertiary,
     borderRadius: t.radius.sm,
   },
   existsBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    flexWrap: 'wrap',
   },
-  confBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: t.radius.sm },
+  similarBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  confBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: t.radius.sm,
+  },
   confHigh: { backgroundColor: '#E7F5EC' },
   confMed: { backgroundColor: '#FFF4E0' },
   confLow: { backgroundColor: '#FFE8E8' },

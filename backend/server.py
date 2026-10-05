@@ -1366,13 +1366,24 @@ async def visual_capture_extract(
     payload: dict,
     user: dict = Depends(get_current_user),
 ):
-    """Extract vocabulary from an image using Muse Glimmer through the AI Gateway."""
+    """Extract vocabulary from an image using Muse Glimmer through the AI Gateway.
+
+    Deduplication pipeline:
+        1) Exact headword match
+        2) Canonical-key match (normalize_headword)
+        3) Semantic embedding match (batch embed + pgvector cosine)
+    Images are never stored or logged.
+    """
     from ai.tasks.multimodal import extract_from_image
     from ai.errors import AIError as _AIError
 
     image = str(payload.get("image", "")).strip()
     if not image.startswith("data:image"):
-        raise HTTPException(status_code=400, detail="Image must be a data URL")
+        raise HTTPException(status_code=400, detail="Image must be a data URL (data:image/...)")
+
+    # Rough base64 size guard (~10 MB encoded ≈ ~7.5 MB raw)
+    if len(image) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image is too large (max ~7 MB)")
 
     max_words = min(int(payload.get("max_words", 15)), 30)
     instruction = str(payload.get("instruction", ""))
@@ -1380,35 +1391,116 @@ async def visual_capture_extract(
     try:
         out = await extract_from_image(
             image, max_words=max_words, instruction=instruction,
+            user_id=user["user_id"],
         )
-    except _AIError:
+    except _AIError as e:
+        code = (e.code or "").lower()
+        msg = (e.message or "").lower()
+        if "auth" in code or "key" in msg:
+            detail = "AI service authentication failed"
+        elif "timeout" in code:
+            detail = "Image analysis timed out — try a smaller or clearer image"
+        elif "rate" in code:
+            detail = "Service is busy — please try again in a moment"
+        else:
+            detail = "Visual extraction is temporarily unavailable"
+        raise HTTPException(status_code=502, detail=detail)
+    except Exception:
         raise HTTPException(status_code=502, detail="Visual extraction is temporarily unavailable")
 
     entries = out.get("entries", [])
+    if not entries:
+        return {
+            "candidates": [],
+            "total_extracted": 0,
+            "model": out.get("model_key"),
+            "provider": out.get("provider"),
+            "fallback_used": out.get("fallback_used", False),
+        }
 
-    # Check which words already exist
-    if entries:
-        existing_headwords = {w.get("headword", "").lower() for w in await repo.load_all_words_minimal()}
-        candidates = []
-        for entry in entries:
-            hw = (entry.get("headword") or "").strip().lower()
-            if not hw:
-                continue
-            entry["already_exists"] = hw in existing_headwords
-            # Try to find existing word id
-            if entry["already_exists"]:
-                existing_word = await repo.get_word_by_headword(hw)
-                if existing_word:
-                    entry["existing_id"] = existing_word["id"]
-            candidates.append(entry)
-    else:
-        candidates = []
+    # ---- Phase 1: Exact + canonical headword deduplication ----
+    all_words = await repo.load_all_words_minimal()
+    headword_map: dict = {}    # lowercase headword → word dict
+    canonical_map: dict = {}   # canonical_key → word dict
+    for w in all_words:
+        hw = (w.get("headword") or "").lower()
+        if hw:
+            headword_map[hw] = w
+        ck = normalize_headword(hw)
+        if ck and ck not in canonical_map:
+            canonical_map[ck] = w
+
+    candidates: list = []
+    unmatched_indices: list = []  # indices into candidates[] needing semantic check
+
+    for entry in entries:
+        hw = (entry.get("headword") or "").strip().lower()
+        if not hw:
+            continue
+
+        existing = headword_map.get(hw)
+        match_type = "exact" if existing else None
+
+        if not existing:
+            ck = normalize_headword(hw)
+            existing = canonical_map.get(ck) if ck else None
+            match_type = "canonical" if existing else None
+
+        if existing:
+            entry["already_exists"] = True
+            entry["existing_id"] = existing["id"]
+            entry["match_type"] = match_type
+        else:
+            entry["already_exists"] = False
+            unmatched_indices.append(len(candidates))
+
+        candidates.append(entry)
+
+    # ---- Phase 2: Semantic deduplication for unmatched candidates ----
+    if unmatched_indices:
+        try:
+            from ai.gateway import gateway as ai_gw
+            unmatched_headwords = [candidates[i]["headword"] for i in unmatched_indices]
+            embed_res = await ai_gw.run_embedding(
+                unmatched_headwords, input_type="query", user_id=user["user_id"],
+            )
+            vectors = embed_res.data or []
+            for j, idx in enumerate(unmatched_indices):
+                if j >= len(vectors) or not vectors[j]:
+                    continue
+                sem_results = await repo.semantic_search(
+                    vectors[j], threshold=0.80, limit=1,
+                )
+                if not sem_results:
+                    continue
+                top = sem_results[0]
+                top_hw = (top.get("headword") or "").lower()
+                sim = top.get("similarity", 0)
+                if sim > 0.88 or top_hw == candidates[idx]["headword"]:
+                    candidates[idx]["already_exists"] = True
+                    candidates[idx]["existing_id"] = top.get("id")
+                    candidates[idx]["match_type"] = "semantic"
+                    candidates[idx]["similar_headword"] = top_hw
+                elif sim > 0.72:
+                    candidates[idx]["similar_word"] = {
+                        "id": top.get("id"),
+                        "headword": top_hw,
+                        "similarity": round(sim, 2),
+                    }
+        except Exception:
+            pass  # Semantic dedup failed — exact/canonical dedup still applied
+
+    await repo.log_event(user["user_id"], "visual_capture_extracted", {
+        "count": len(candidates),
+        "model": out.get("model_key"),
+    })
 
     return {
         "candidates": candidates,
         "total_extracted": len(candidates),
         "model": out.get("model_key"),
         "provider": out.get("provider"),
+        "fallback_used": out.get("fallback_used", False),
     }
 
 
@@ -1418,14 +1510,27 @@ async def visual_capture_import(
     user: dict = Depends(get_current_user),
 ):
     """Import selected visual capture candidates into the vocabulary bank.
-    All go to REVIEW status (never auto-published)."""
+
+    All go to REVIEW status (never auto-published).
+    Source context (detected_context) is preserved as the example if no better
+    example was generated.
+    """
     words = payload.get("words", [])
-    if not words:
+    if not words or not isinstance(words, list):
         raise HTTPException(status_code=400, detail="No words to import")
+    if len(words) > 50:
+        raise HTTPException(status_code=400, detail="Too many words in one import (max 50)")
+
+    # Preserve detected_context → example if example is absent
+    for w in words:
+        ctx = w.pop("detected_context", None)
+        if ctx and not w.get("example"):
+            w["example"] = ctx
 
     results = await bulk_ingest(repo, words, provenance="AI_GENERATED")
     await repo.log_event(user["user_id"], "visual_capture_imported", {
         "count": results.get("created", 0),
+        "total_submitted": len(words),
     })
     return results
 
